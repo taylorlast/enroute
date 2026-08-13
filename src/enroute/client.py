@@ -115,8 +115,7 @@ class Enroute:
         )
         if not provider_map:
             raise ConfigurationError(
-                "no providers configured; pass api_key=... / ENROUTE_API_KEY "
-                "or providers={...}"
+                "no providers configured; pass api_key=... / ENROUTE_API_KEY or providers={...}"
             )
         self._providers = provider_map
         self.router = Router(
