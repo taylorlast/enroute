@@ -1,0 +1,137 @@
+{
+  "updated_at": "2026-08-12T00:00:00Z",
+  "models": [
+    {
+      "id": "openai/gpt-4o-mini",
+      "name": "OpenAI: GPT-4o Mini",
+      "context_length": 128000,
+      "pricing": {"prompt": "0.00000015", "completion": "0.0000006"},
+      "architecture": {
+        "modality": "text+image->text",
+        "input_modalities": ["text", "image"],
+        "output_modalities": ["text"]
+      },
+      "supported_parameters": ["temperature", "top_p", "max_tokens", "tools", "tool_choice", "response_format", "seed", "stop"]
+    },
+    {
+      "id": "openai/gpt-4o",
+      "name": "OpenAI: GPT-4o",
+      "context_length": 128000,
+      "pricing": {"prompt": "0.0000025", "completion": "0.00001"},
+      "architecture": {
+        "modality": "text+image->text",
+        "input_modalities": ["text", "image"],
+        "output_modalities": ["text"]
+      },
+      "supported_parameters": ["temperature", "top_p", "max_tokens", "tools", "tool_choice", "response_format", "seed", "stop"]
+    },
+    {
+      "id": "anthropic/claude-sonnet-4",
+      "name": "Anthropic: Claude Sonnet 4",
+      "context_length": 200000,
+      "pricing": {"prompt": "0.000003", "completion": "0.000015"},
+      "architecture": {
+        "modality": "text+image->text",
+        "input_modalities": ["text", "image"],
+        "output_modalities": ["text"]
+      },
+      "supported_parameters": ["temperature", "top_p", "max_tokens", "tools", "tool_choice", "stop"]
+    },
+    {
+      "id": "anthropic/claude-haiku-4.5",
+      "name": "Anthropic: Claude Haiku 4.5",
+      "context_length": 200000,
+      "pricing": {"prompt": "0.000001", "completion": "0.000005"},
+      "architecture": {
+        "modality": "text+image->text",
+        "input_modalities": ["text", "image"],
+        "output_modalities": ["text"]
+      },
+      "supported_parameters": ["temperature", "top_p", "max_tokens", "tools", "tool_choice", "stop"]
+    },
+    {
+      "id": "google/gemini-2.5-flash",
+      "name": "Google: Gemini 2.5 Flash",
+      "context_length": 1000000,
+      "pricing": {"prompt": "0.0000003", "completion": "0.0000025"},
+      "architecture": {
+        "modality": "text+image->text",
+        "input_modalities": ["text", "image"],
+        "output_modalities": ["text"]
+      },
+      "supported_parameters": ["temperature", "top_p", "max_tokens", "tools", "stop"]
+    },
+    {
+      "id": "google/gemini-2.5-pro",
+      "name": "Google: Gemini 2.5 Pro",
+      "context_length": 1000000,
+      "pricing": {"prompt": "0.00000125", "completion": "0.00001"},
+      "architecture": {
+        "modality": "text+image->text",
+        "input_modalities": ["text", "image"],
+        "output_modalities": ["text"]
+      },
+      "supported_parameters": ["temperature", "top_p", "max_tokens", "tools", "stop"]
+    },
+    {
+      "id": "groq/llama-3.3-70b-versatile",
+      "name": "Groq: Llama 3.3 70B",
+      "context_length": 131072,
+      "pricing": {"prompt": "0.00000059", "completion": "0.00000079"},
+      "architecture": {
+        "modality": "text->text",
+        "input_modalities": ["text"],
+        "output_modalities": ["text"]
+      },
+      "supported_parameters": ["temperature", "top_p", "max_tokens", "tools", "stop"]
+    },
+    {
+      "id": "deepseek/deepseek-chat",
+      "name": "DeepSeek: Chat",
+      "context_length": 65536,
+      "pricing": {"prompt": "0.00000027", "completion": "0.0000011"},
+      "architecture": {
+        "modality": "text->text",
+        "input_modalities": ["text"],
+        "output_modalities": ["text"]
+      },
+      "supported_parameters": ["temperature", "top_p", "max_tokens", "tools", "stop"]
+    },
+    {
+      "id": "xai/grok-2",
+      "name": "xAI: Grok 2",
+      "context_length": 131072,
+      "pricing": {"prompt": "0.000002", "completion": "0.00001"},
+      "architecture": {
+        "modality": "text->text",
+        "input_modalities": ["text"],
+        "output_modalities": ["text"]
+      },
+      "supported_parameters": ["temperature", "top_p", "max_tokens", "tools", "stop"]
+    },
+    {
+      "id": "mistral/mistral-large-latest",
+      "name": "Mistral: Large",
+      "context_length": 128000,
+      "pricing": {"prompt": "0.000002", "completion": "0.000006"},
+      "architecture": {
+        "modality": "text->text",
+        "input_modalities": ["text"],
+        "output_modalities": ["text"]
+      },
+      "supported_parameters": ["temperature", "top_p", "max_tokens", "tools", "stop"]
+    },
+    {
+      "id": "fireworks/accounts/fireworks/models/llama-v3p3-70b-instruct",
+      "name": "Fireworks: Llama 3.3 70B Instruct",
+      "context_length": 131072,
+      "pricing": {"prompt": "0.0000009", "completion": "0.0000009"},
+      "architecture": {
+        "modality": "text->text",
+        "input_modalities": ["text"],
+        "output_modalities": ["text"]
+      },
+      "supported_parameters": ["temperature", "top_p", "max_tokens", "tools", "stop"]
+    }
+  ]
+}

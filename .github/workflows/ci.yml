@@ -1,0 +1,99 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+
+concurrency:
+  group: ci-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  lint:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: astral-sh/setup-uv@v5
+        with:
+          enable-cache: true
+      - name: Install
+        run: uv sync --group dev --group docs
+      - name: Ruff check
+        run: uv run ruff check .
+      - name: Ruff format
+        run: uv run ruff format --check .
+      - name: Mypy
+        run: uv run mypy src/enroute
+
+  test:
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        python-version: ["3.10", "3.11", "3.12", "3.13", "3.14"]
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - uses: astral-sh/setup-uv@v5
+        with:
+          enable-cache: true
+          python-version: ${{ matrix.python-version }}
+      - name: Install
+        run: uv sync --group dev
+      - name: Pytest
+        run: uv run pytest -m "not live"
+
+  examples:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - uses: astral-sh/setup-uv@v5
+        with:
+          enable-cache: true
+          python-version: "3.12"
+      - name: Install
+        run: uv sync --group dev
+      - name: Run examples
+        run: |
+          set -euo pipefail
+          # Offline-safe examples (no live API key required)
+          while IFS= read -r f; do
+            echo "==> $f"
+            uv run python "$f"
+          done < <(
+            find examples/tracing examples/environment examples/benchmarking \
+              -type f -name '*.py' | sort
+            echo examples/routing/catalog/list_models.py
+          )
+          # Cookbook routing examples need ENROUTE_API_KEY (skipped in CI)
+          if [[ -n "${ENROUTE_API_KEY:-}" ]]; then
+            while IFS= read -r f; do
+              echo "==> $f"
+              uv run python "$f"
+            done < <(
+              find examples/routing -type f -name '*.py' \
+                ! -path 'examples/routing/catalog/*' | sort
+            )
+          else
+            echo "SKIP examples/routing/* (set ENROUTE_API_KEY to run cookbook examples)"
+          fi
+
+  docs:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - uses: astral-sh/setup-uv@v5
+        with:
+          enable-cache: true
+          python-version: "3.12"
+      - name: Install
+        run: uv sync --group docs --group dev
+      - name: MkDocs strict build
+        run: uv run mkdocs build --strict

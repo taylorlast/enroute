@@ -1,0 +1,159 @@
+[build-system]
+requires = ["hatchling", "hatch-vcs"]
+build-backend = "hatchling.build"
+
+[project]
+name = "enroute"
+dynamic = ["version"]
+description = "Unified LLM routing with first-class traces, environments, and benchmarks."
+readme = "README.md"
+license = "Apache-2.0"
+requires-python = ">=3.10"
+authors = [{ name = "enroute" }]
+keywords = [
+  "llm",
+  "routing",
+  "openrouter",
+  "tracing",
+  "environments",
+  "benchmarks",
+  "ai",
+]
+classifiers = [
+  "Development Status :: 3 - Alpha",
+  "Intended Audience :: Developers",
+  "License :: OSI Approved :: Apache Software License",
+  "Programming Language :: Python :: 3",
+  "Programming Language :: Python :: 3.10",
+  "Programming Language :: Python :: 3.11",
+  "Programming Language :: Python :: 3.12",
+  "Programming Language :: Python :: 3.13",
+  "Programming Language :: Python :: 3.14",
+  "Typing :: Typed",
+]
+dependencies = [
+  "httpx>=0.27,<1",
+  "pydantic>=2.7,<3",
+]
+
+[project.optional-dependencies]
+otel = [
+  "opentelemetry-api>=1.27,<2",
+  "opentelemetry-sdk>=1.27,<2",
+]
+all = [
+  "enroute[otel]",
+]
+
+[project.urls]
+Homepage = "https://github.com/enroute-ai/enroute"
+Documentation = "https://enroute-ai.github.io/enroute/"
+Repository = "https://github.com/enroute-ai/enroute"
+Issues = "https://github.com/enroute-ai/enroute/issues"
+Changelog = "https://github.com/enroute-ai/enroute/blob/main/CHANGELOG.md"
+
+[dependency-groups]
+dev = [
+  "pytest>=8.0",
+  "pytest-asyncio>=0.24",
+  "respx>=0.21",
+  "ruff>=0.9",
+  "mypy>=1.14",
+]
+docs = [
+  "mkdocs-material>=9.5",
+  "mkdocstrings[python]>=0.27",
+  "mkdocs-llmstxt>=0.2",
+  "mike>=2.1",
+]
+
+[tool.hatch.version]
+source = "vcs"
+
+[tool.hatch.build.targets.wheel]
+packages = ["src/enroute"]
+
+[tool.hatch.build.targets.sdist]
+include = [
+  "/src",
+  "/tests",
+  "/examples",
+  "/docs",
+  "/README.md",
+  "/LICENSE",
+  "/CHANGELOG.md",
+]
+
+[tool.ruff]
+target-version = "py310"
+line-length = 100
+src = ["src", "tests", "examples"]
+
+[tool.ruff.format]
+docstring-code-format = true
+exclude = ["docs/**", "*.md"]
+
+[tool.ruff.lint]
+preview = true
+select = [
+  "E",
+  "F",
+  "I",
+  "UP",
+  "B",
+  "SIM",
+  "D",
+  "DOC",
+]
+ignore = [
+  "D100", # package/module docstrings covered by hand-written docs
+  "D104",
+  "D105",
+  "D107",
+  # DOC501/502 mis-detect `raise helper()` factory patterns used by providers.
+  "DOC501",
+  "DOC502",
+]
+
+[tool.ruff.lint.pydocstyle]
+convention = "google"
+
+[tool.ruff.lint.per-file-ignores]
+"tests/**" = ["D", "DOC"]
+"examples/**" = ["D", "DOC", "E501"]
+"docs/**" = ["D", "DOC"]
+
+[tool.mypy]
+python_version = "3.10"
+strict = true
+warn_return_any = true
+warn_unused_configs = true
+packages = ["enroute"]
+mypy_path = "src"
+
+[[tool.mypy.overrides]]
+module = "opentelemetry.*"
+ignore_missing_imports = true
+
+[tool.pytest.ini_options]
+minversion = "8.0"
+testpaths = ["tests"]
+asyncio_mode = "auto"
+addopts = [
+  "--doctest-modules",
+  "--ignore=docs",
+  "--ignore=examples",
+  "--ignore=tests/typing",
+]
+markers = [
+  "live: tests that call real provider APIs (deselect with -m 'not live')",
+]
+filterwarnings = [
+  "error",
+  "ignore::pytest.PytestUnraisableExceptionWarning",
+  "ignore::ResourceWarning",
+]
+
+[tool.coverage.run]
+source = ["enroute"]
+branch = true

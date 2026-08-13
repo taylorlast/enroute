@@ -1,0 +1,37 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://enroute.dev/schemas/trace.v1.json",
+  "title": "enroute Trace",
+  "type": "object",
+  "required": ["trace_id", "steps", "schema_version", "created_at"],
+  "properties": {
+    "trace_id": { "type": "string" },
+    "environment": { "type": ["string", "null"] },
+    "environment_version": { "type": ["string", "null"] },
+    "task_id": { "type": ["string", "null"] },
+    "steps": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "required": ["type"],
+        "properties": {
+          "type": { "enum": ["llm", "tool", "event"] }
+        }
+      }
+    },
+    "outcome": {
+      "type": ["object", "null"],
+      "properties": {
+        "scores": { "type": "object", "additionalProperties": { "type": "number" } },
+        "reward": { "type": ["number", "null"] },
+        "labels": { "type": "object" },
+        "feedback": { "type": ["string", "null"] }
+      }
+    },
+    "tags": { "type": "object", "additionalProperties": { "type": "string" } },
+    "metadata": { "type": "object" },
+    "created_at": { "type": "string" },
+    "schema_version": { "type": "string", "const": "1.0.0" }
+  },
+  "additionalProperties": true
+}
