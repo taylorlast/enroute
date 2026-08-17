@@ -252,6 +252,11 @@ class LowestLatency:
         "meta": 8,
         "mistral": 9,
         "anthropic": 10,
+        # Reselling a lab's model through a cloud adds a hop, and measured
+        # throughput trails the lab's own endpoint, so these rank after it.
+        "vertex": 11,
+        "azure": 11,
+        "bedrock": 13,
         "moonshot": 20,
         "qwen": 21,
         "zhipu": 22,

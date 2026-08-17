@@ -36,11 +36,22 @@ class _StubProvider:
         return None
 
 
+def model_order(routes: list) -> list[str]:
+    """Candidate order with host expansion collapsed.
+
+    Models list a varying number of hosts, so asserting on positional index
+    breaks whenever a cloud is added to the catalog.
+    """
+    return list(dict.fromkeys(route.model for route in routes))
+
+
 def test_explicit_order() -> None:
     catalog = ModelCatalog()
     req = ChatRequest(model="openai/gpt-5.6-sol", messages=[Message(role="user", content="hi")])
     routes = Explicit().select(req, ["openai/gpt-5.6-sol", "openai/gpt-5.6-luna"], catalog)
-    assert [r.model for r in routes] == ["openai/gpt-5.6-sol", "openai/gpt-5.6-luna"]
+    assert model_order(routes) == ["openai/gpt-5.6-sol", "openai/gpt-5.6-luna"]
+    # The lab's own endpoint leads; clouds follow as fallbacks.
+    assert routes[0].provider == "openai"
 
 
 def test_least_cost_sorts_fallbacks() -> None:
@@ -55,8 +66,12 @@ def test_least_cost_sorts_fallbacks() -> None:
         ["openai/gpt-5.6-sol", "openai/gpt-5.6-luna", "anthropic/claude-sonnet-5"],
         catalog,
     )
-    assert routes[0].model == "openai/gpt-5.6-sol"
-    assert routes[1].model == "openai/gpt-5.6-luna"
+    # The primary stays first; the cheaper fallback outranks the pricier one.
+    assert model_order(routes) == [
+        "openai/gpt-5.6-sol",
+        "openai/gpt-5.6-luna",
+        "anthropic/claude-sonnet-5",
+    ]
 
 
 def test_provider_only_filter() -> None:
