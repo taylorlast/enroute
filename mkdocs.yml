@@ -72,6 +72,7 @@ nav:
       - Benchmark models: guides/benchmark-models.md
       - Redact PII: guides/redact-pii.md
       - Export to OpenTelemetry: guides/export-otel.md
+      - Azure and Bedrock: guides/cloud-providers.md
       - Add your own provider: guides/add-provider.md
       - Migrate from OpenRouter: guides/migrate-openrouter.md
   - Reference:

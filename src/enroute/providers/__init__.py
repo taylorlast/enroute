@@ -9,7 +9,9 @@ Examples:
 from __future__ import annotations
 
 from enroute.providers.anthropic import AnthropicProvider
+from enroute.providers.azure import AzureOpenAIProvider
 from enroute.providers.base import Provider, ProviderConfig
+from enroute.providers.bedrock import BedrockProvider
 from enroute.providers.google import GoogleProvider
 from enroute.providers.openai_compatible import (
     BasetenProvider,
@@ -29,7 +31,9 @@ from enroute.providers.openai_compatible import (
 
 __all__ = [
     "AnthropicProvider",
+    "AzureOpenAIProvider",
     "BasetenProvider",
+    "BedrockProvider",
     "DeepSeekProvider",
     "FireworksProvider",
     "GoogleProvider",

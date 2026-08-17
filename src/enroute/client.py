@@ -11,6 +11,7 @@ Examples:
 
 from __future__ import annotations
 
+import json
 import os
 from collections.abc import AsyncIterator, Iterator, Mapping, Sequence
 from pathlib import Path
@@ -20,7 +21,9 @@ from enroute.catalog.models import ModelCatalog
 from enroute.config import DEFAULT_SETTINGS
 from enroute.errors import ConfigurationError
 from enroute.providers.anthropic import AnthropicProvider
+from enroute.providers.azure import AzureOpenAIProvider
 from enroute.providers.base import Provider
+from enroute.providers.bedrock import BedrockProvider
 from enroute.providers.google import GoogleProvider
 from enroute.providers.openai_compatible import (
     BasetenProvider,
@@ -61,6 +64,118 @@ _PROVIDER_CTORS: dict[str, type] = {
     "qwen": QwenProvider,
     "zhipu": ZhipuProvider,
 }
+
+PROVIDER_ENV_KEYS: dict[str, str] = {
+    "openai": "OPENAI_API_KEY",
+    "anthropic": "ANTHROPIC_API_KEY",
+    "google": "GOOGLE_API_KEY",
+    "groq": "GROQ_API_KEY",
+    "together": "TOGETHER_API_KEY",
+    "fireworks": "FIREWORKS_API_KEY",
+    "baseten": "BASETEN_API_KEY",
+    "xai": "XAI_API_KEY",
+    "deepseek": "DEEPSEEK_API_KEY",
+    "mistral": "MISTRAL_API_KEY",
+    "meta": "META_API_KEY",
+    "moonshot": "MOONSHOT_API_KEY",
+    "qwen": "DASHSCOPE_API_KEY",
+    "zhipu": "ZAI_API_KEY",
+    "azure": "AZURE_OPENAI_API_KEY",
+    "bedrock": "AWS_BEARER_TOKEN_BEDROCK",
+}
+
+
+def _json_env(name: str) -> dict[str, str]:
+    """Read a JSON object from the environment.
+
+    Args:
+        name: Environment variable holding a JSON object.
+
+    Returns:
+        The decoded mapping, empty when unset or malformed.
+    """
+    raw = os.environ.get(name)
+    if not raw:
+        return {}
+    try:
+        parsed = json.loads(raw)
+    except json.JSONDecodeError:
+        return {}
+    if not isinstance(parsed, dict):
+        return {}
+    return {str(key): str(value) for key, value in parsed.items()}
+
+
+def build_azure(api_key: str) -> Provider:
+    """Construct an Azure provider from environment configuration.
+
+    Deployment names are chosen by whoever provisions the resource, so they cannot
+    be derived from a model id and must be supplied.
+
+    Args:
+        api_key: Azure API key.
+
+    Returns:
+        A configured Azure provider.
+    """
+    return AzureOpenAIProvider(
+        api_key,
+        endpoint=os.environ.get("AZURE_OPENAI_ENDPOINT"),
+        deployments=_json_env("AZURE_OPENAI_DEPLOYMENTS"),
+        api_version=os.environ.get("AZURE_OPENAI_API_VERSION") or None,
+        region=os.environ.get("AZURE_OPENAI_REGION") or "us",
+    )
+
+
+def build_bedrock(api_key: str | None) -> Provider:
+    """Construct a Bedrock provider from environment configuration.
+
+    Args:
+        api_key: Bedrock API key, or ``None`` to sign with IAM credentials.
+
+    Returns:
+        A configured Bedrock provider.
+    """
+    return BedrockProvider(
+        api_key,
+        region=(
+            os.environ.get("AWS_REGION") or os.environ.get("AWS_DEFAULT_REGION") or "us-east-1"
+        ),
+        models=_json_env("BEDROCK_MODEL_IDS"),
+        access_key_id=os.environ.get("AWS_ACCESS_KEY_ID"),
+        secret_access_key=os.environ.get("AWS_SECRET_ACCESS_KEY"),
+        session_token=os.environ.get("AWS_SESSION_TOKEN"),
+    )
+
+
+_PROVIDER_BUILDERS: dict[str, Any] = {
+    "azure": build_azure,
+    "bedrock": build_bedrock,
+}
+
+
+def build_provider(slug: str, api_key: str) -> Provider:
+    """Build a provider adapter from a slug and key.
+
+    Args:
+        slug: Provider slug.
+        api_key: Provider API key.
+
+    Returns:
+        A configured provider.
+
+    Raises:
+        ConfigurationError: If the slug has no adapter.
+    """
+    builder = _PROVIDER_BUILDERS.get(slug)
+    if builder is not None:
+        provider: Provider = builder(api_key)
+        return provider
+    ctor = _PROVIDER_CTORS.get(slug)
+    if ctor is None:
+        raise ConfigurationError(f"no adapter for provider '{slug}'", provider=slug)
+    built: Provider = ctor(api_key)
+    return built
 
 
 class Enroute:
@@ -161,40 +276,28 @@ class Enroute:
             )
         if providers:
             for name, value in providers.items():
-                if isinstance(value, str):
-                    ctor = _PROVIDER_CTORS.get(name)
-                    if ctor is None:
-                        result[name] = OpenAICompatible(
-                            api_key=value,
-                            base_url=base_url or DEFAULT_SETTINGS.gateway_base_url,
-                            name=name,
-                        )
-                    else:
-                        result[name] = ctor(value)
-                else:
+                if not isinstance(value, str):
                     result[name] = value
-        # Env-var convenience for common providers.
-        env_map = {
-            "openai": "OPENAI_API_KEY",
-            "anthropic": "ANTHROPIC_API_KEY",
-            "google": "GOOGLE_API_KEY",
-            "groq": "GROQ_API_KEY",
-            "together": "TOGETHER_API_KEY",
-            "fireworks": "FIREWORKS_API_KEY",
-            "baseten": "BASETEN_API_KEY",
-            "xai": "XAI_API_KEY",
-            "deepseek": "DEEPSEEK_API_KEY",
-            "mistral": "MISTRAL_API_KEY",
-            "meta": "META_API_KEY",
-            "moonshot": "MOONSHOT_API_KEY",
-            "qwen": "DASHSCOPE_API_KEY",
-            "zhipu": "ZAI_API_KEY",
-        }
+                elif name not in _PROVIDER_CTORS and name not in _PROVIDER_BUILDERS:
+                    if not base_url:
+                        # Defaulting to the gateway URL here would send the key to
+                        # the wrong host under a name that looks like a real vendor.
+                        raise ConfigurationError(
+                            f"no adapter for provider '{name}'; pass base_url to "
+                            "treat it as an OpenAI-compatible endpoint",
+                            provider=name,
+                        )
+                    result[name] = OpenAICompatible(api_key=value, base_url=base_url, name=name)
+                else:
+                    result[name] = build_provider(name, value)
         if not providers and not api_key:
-            for slug, env_name in env_map.items():
+            for slug, env_name in PROVIDER_ENV_KEYS.items():
                 key = os.environ.get(env_name)
                 if key:
-                    result[slug] = _PROVIDER_CTORS[slug](key)
+                    result[slug] = build_provider(slug, key)
+            # Bedrock also works from ambient IAM credentials with no key at all.
+            if "bedrock" not in result and os.environ.get("AWS_ACCESS_KEY_ID"):
+                result["bedrock"] = build_bedrock(None)
         return result
 
     def chat(
