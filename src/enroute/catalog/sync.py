@@ -13,10 +13,15 @@ Pricing is pass-through, so a model with no price must never go live. New models
 are written without pricing when none can be resolved, which leaves them
 unavailable until a human fills the rate in.
 
+Upstream price changes are applied automatically because a stale rate bills the
+wrong amount on every request. Adding a model is deliberate, since the catalog is
+curated rather than a mirror of everything available.
+
 Run it with::
 
     python -m enroute.catalog.sync --check
     python -m enroute.catalog.sync --write --report catalog-report.md
+    python -m enroute.catalog.sync --write --add openai/gpt-5.6-luna
 """
 
 from __future__ import annotations
@@ -186,7 +191,8 @@ class CatalogDiff:
     """What the sync found relative to the bundled catalog.
 
     Attributes:
-        added: Models we could serve that are missing from the catalog.
+        candidates: Upstream models we could carry but do not. Reported only; the
+            catalog is curated, so adding one is an explicit choice.
         removed: Catalog ids the upstream reference no longer lists.
         repriced: Rates that moved upstream.
         unpriced: Catalog ids with no usable price, which stay hidden.
@@ -194,7 +200,7 @@ class CatalogDiff:
         providers_checked: Provider slugs whose listings were fetched.
     """
 
-    added: list[UpstreamModel] = field(default_factory=list)
+    candidates: list[UpstreamModel] = field(default_factory=list)
     removed: list[str] = field(default_factory=list)
     repriced: list[PriceChange] = field(default_factory=list)
     unpriced: list[str] = field(default_factory=list)
@@ -202,13 +208,22 @@ class CatalogDiff:
     providers_checked: list[str] = field(default_factory=list)
 
     @property
-    def empty(self) -> bool:
-        """Whether the catalog already matches upstream.
+    def has_updates(self) -> bool:
+        """Whether anything would be written without an explicit request.
 
         Returns:
-            ``True`` when nothing needs review.
+            ``True`` when a price moved upstream.
         """
-        return not (self.added or self.removed or self.repriced)
+        return bool(self.repriced)
+
+    @property
+    def empty(self) -> bool:
+        """Whether there is nothing at all worth reporting.
+
+        Returns:
+            ``True`` when the catalog matches upstream and nothing is pending.
+        """
+        return not (self.candidates or self.removed or self.repriced)
 
 
 def parse_openrouter(payload: Mapping[str, Any]) -> dict[str, UpstreamModel]:
@@ -337,16 +352,15 @@ def diff_catalog(
     served: set[str],
     *,
     providers_checked: Iterable[str] = (),
-    add_unserved: bool = False,
 ) -> CatalogDiff:
     """Compare the bundled catalog against upstream.
 
     Args:
         current: Decoded ``models.json``.
         upstream: Upstream models keyed by id.
-        served: Normalized slugs configured providers report.
+        served: Normalized slugs configured providers report. Empty means
+            availability could not be confirmed, so nothing is filtered on it.
         providers_checked: Provider slugs that answered.
-        add_unserved: Propose models even when no provider confirms them.
 
     Returns:
         The differences a human needs to review.
@@ -374,9 +388,12 @@ def diff_catalog(
     for model_id, candidate in sorted(upstream.items()):
         if model_id in entries:
             continue
-        confirmed = normalize_model_id(model_id) in served
-        if confirmed or (add_unserved and candidate.author in PROVIDER_ENV):
-            result.added.append(candidate)
+        # Only authors we have an adapter for are routable at all.
+        if candidate.author not in PROVIDER_ENV:
+            continue
+        if served and normalize_model_id(model_id) not in served:
+            continue
+        result.candidates.append(candidate)
     return result
 
 
@@ -449,17 +466,20 @@ def apply_diff(
     upstream: Mapping[str, UpstreamModel],
     changes: CatalogDiff,
     *,
+    add: Iterable[str] = (),
     now: datetime | None = None,
 ) -> dict[str, Any]:
     """Produce an updated catalog document.
 
-    Removals are left alone: pulling a model breaks callers, so that stays a
-    deliberate edit.
+    Price drift is applied automatically because a stale rate bills the wrong
+    amount on every request. Additions and removals are deliberate: the catalog
+    is curated, and dropping a model breaks callers.
 
     Args:
         current: Decoded ``models.json``.
         upstream: Upstream models keyed by id.
         changes: Differences from :func:`diff_catalog`.
+        add: Model ids to bring into the catalog.
         now: Timestamp to stamp the document with.
 
     Returns:
@@ -491,8 +511,10 @@ def apply_diff(
         if endpoints:
             spec["endpoints"] = endpoints
 
-    for model in changes.added:
-        entries[model.id] = _spec_from_upstream(model)
+    for model_id in add:
+        model = upstream.get(model_id)
+        if model is not None:
+            entries[model.id] = _spec_from_upstream(model)
 
     return {
         "updated_at": stamped.strftime("%Y-%m-%dT%H:%M:%SZ"),
@@ -520,12 +542,6 @@ def render_report(changes: CatalogDiff) -> str:
         lines.append("The catalog already matches upstream.")
         return "\n".join(lines)
 
-    if changes.added:
-        lines.append(f"### Added ({len(changes.added)})")
-        for model in changes.added:
-            note = "" if model.priced else " — **no price, stays hidden**"
-            lines.append(f"- `{model.id}`{note}")
-        lines.append("")
     if changes.repriced:
         lines.append(f"### Repriced ({len(changes.repriced)})")
         for change in changes.repriced:
@@ -546,6 +562,18 @@ def render_report(changes: CatalogDiff) -> str:
         lines.append(f"### Not listed by a configured provider ({len(changes.unconfirmed)})")
         for model_id in changes.unconfirmed:
             lines.append(f"- `{model_id}`")
+        lines.append("")
+    if changes.candidates:
+        lines.append(f"### Available upstream, not carried ({len(changes.candidates)})")
+        lines.append("Add one with `--add <id>` when you want to offer it.")
+        lines.append("")
+        lines.append("<details><summary>Show candidates</summary>")
+        lines.append("")
+        for model in changes.candidates:
+            note = "" if model.priced else " — no upstream price"
+            lines.append(f"- `{model.id}`{note}")
+        lines.append("")
+        lines.append("</details>")
         lines.append("")
     return "\n".join(lines)
 
@@ -592,9 +620,11 @@ def main(argv: list[str] | None = None) -> int:
     )
     parser.add_argument("--report", type=Path, help="Write a markdown report here.")
     parser.add_argument(
-        "--add-unserved",
-        action="store_true",
-        help="Propose models even when no configured provider lists them.",
+        "--add",
+        action="append",
+        default=[],
+        metavar="MODEL_ID",
+        help="Bring a model into the catalog. Repeatable.",
     )
     parser.add_argument("--path", type=Path, default=DATA_PATH)
     args = parser.parse_args(argv)
@@ -604,22 +634,20 @@ def main(argv: list[str] | None = None) -> int:
         upstream = fetch_openrouter(client)
         served, checked = collect_served_slugs(client)
 
-    changes = diff_catalog(
-        current,
-        upstream,
-        served,
-        providers_checked=checked,
-        add_unserved=args.add_unserved,
-    )
+    changes = diff_catalog(current, upstream, served, providers_checked=checked)
     report = render_report(changes)
     print(report)
     if args.report:
         args.report.write_text(report, encoding="utf-8")
 
-    if args.write and not changes.empty:
-        write_catalog(apply_diff(current, upstream, changes), args.path)
+    unknown = [model_id for model_id in args.add if model_id not in upstream]
+    if unknown:
+        parser.error(f"unknown model ids: {', '.join(unknown)}")
 
-    return 1 if args.check and not changes.empty else 0
+    if args.write and (changes.has_updates or args.add):
+        write_catalog(apply_diff(current, upstream, changes, add=args.add), args.path)
+
+    return 1 if args.check and changes.has_updates else 0
 
 
 if __name__ == "__main__":  # pragma: no cover

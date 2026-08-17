@@ -39,23 +39,32 @@ A change that adds a public symbol is incomplete until:
 context windows, and pass-through pricing. It is static so every rate change is
 reviewable in git history.
 
-A weekly workflow refreshes it from OpenRouter's public catalog and, when
-provider keys are configured as repository secrets, from each provider's own
-model listing. It opens a PR rather than pushing to `main`, because a wrong
-price costs real money on every request.
+A weekly workflow refreshes it from OpenRouter's public catalog and opens a PR
+rather than pushing to `main`, because a wrong price costs real money on every
+request. It uses no secrets: this repository is public, and provider keys belong
+to the deployments that consume the library.
 
 Run it yourself with:
 
 ```bash
-uv run python -m enroute.catalog.sync --check          # report drift, exit 1 if stale
-uv run python -m enroute.catalog.sync --write          # apply to models.json
-uv run python -m enroute.catalog.sync --add-unserved   # include models no provider confirms
+uv run python -m enroute.catalog.sync --check   # report drift, exit 1 if stale
+uv run python -m enroute.catalog.sync --write   # apply price changes
+uv run python -m enroute.catalog.sync --write --add openai/gpt-5.6-luna
 ```
 
-A model with no price is deliberately left unpriced. Downstream gateways treat
-an unpriced model as unavailable, so it stays hidden until someone fills the
-rate in. Models the upstream reference stops listing are reported but never
-removed automatically, since dropping one breaks callers.
+Three rules keep the file trustworthy:
+
+- **Prices are applied automatically.** A stale rate misbills every request, so
+  drift is the one thing the job fixes on its own.
+- **Additions are deliberate.** The catalog is curated, not a mirror. New models
+  are listed in the report as candidates; `--add` brings one in.
+- **Removals never happen automatically.** Dropping a model breaks callers, so
+  the job reports and leaves it.
+
+A model with no price is left unpriced. Downstream gateways treat an unpriced
+model as unavailable, so it stays hidden until someone fills the rate in. If a
+model needs per-host rates, set them on its `endpoints` entries; the sync moves a
+host rate only when it was tracking the default.
 
 ## Release
 

@@ -75,46 +75,55 @@ def test_parse_openrouter_handles_unpriced_models() -> None:
     assert models["openai/free"].priced is True
 
 
-def test_diff_detects_price_drift_and_additions() -> None:
+def test_diff_detects_price_drift_and_candidates() -> None:
     served = {"gpt-x", "brand-new", "no-price"}
     changes = diff_catalog(CURRENT, UPSTREAM, served, providers_checked=["openai"])
 
-    assert [c.id for c in changes.added] == ["openai/brand-new"]
+    assert [c.id for c in changes.candidates] == ["openai/brand-new"]
     assert changes.removed == ["openai/retired"]
     assert changes.unpriced == ["openai/no-price"]
     # Only the completion rate moved.
     assert [(c.id, c.field_name, c.new) for c in changes.repriced] == [
         ("openai/gpt-x", "completion", 4e-6)
     ]
-    assert changes.empty is False
+    assert changes.has_updates is True
 
 
-def test_diff_skips_models_no_provider_serves() -> None:
+def test_diff_skips_candidates_no_provider_serves() -> None:
     changes = diff_catalog(CURRENT, UPSTREAM, {"gpt-x"}, providers_checked=["openai"])
-    assert changes.added == []
+    assert changes.candidates == []
     # Everything we hold that openai no longer lists is called out.
     assert "openai/no-price" in changes.unconfirmed
 
 
-def test_diff_can_propose_unserved_models_for_known_authors() -> None:
-    changes = diff_catalog(CURRENT, UPSTREAM, set(), add_unserved=True)
-    added = [model.id for model in changes.added]
-    assert "openai/brand-new" in added
-    # acme is not a provider we can route to.
-    assert "acme/unknown-author" not in added
+def test_diff_proposes_only_routable_authors_when_unconfirmed() -> None:
+    changes = diff_catalog(CURRENT, UPSTREAM, set())
+    ids = [model.id for model in changes.candidates]
+    assert "openai/brand-new" in ids
+    # acme is not a provider we have an adapter for.
+    assert "acme/unknown-author" not in ids
 
 
-def test_apply_writes_prices_and_hides_unpriced_additions() -> None:
+def test_apply_reprices_without_adding_candidates() -> None:
     served = {"gpt-x", "brand-new", "no-price"}
     changes = diff_catalog(CURRENT, UPSTREAM, served)
     updated = apply_diff(CURRENT, UPSTREAM, changes)
     entries = {spec["id"]: spec for spec in updated["models"]}
 
     assert entries["openai/gpt-x"]["pricing"]["completion"] == "0.000004"
-    assert entries["openai/brand-new"]["pricing"]["prompt"] == "0.000002"
+    # A curated catalog does not grow on its own.
+    assert "openai/brand-new" not in entries
     # Removals stay put so we never silently break a caller.
     assert "openai/retired" in entries
     assert sorted(entries) == list(entries)
+
+
+def test_apply_adds_only_requested_models() -> None:
+    changes = diff_catalog(CURRENT, UPSTREAM, set())
+    updated = apply_diff(CURRENT, UPSTREAM, changes, add=["openai/brand-new"])
+    entries = {spec["id"]: spec for spec in updated["models"]}
+    assert entries["openai/brand-new"]["pricing"]["prompt"] == "0.000002"
+    assert "acme/unknown-author" not in entries
 
 
 def test_apply_moves_endpoints_that_tracked_the_default_price() -> None:
@@ -152,10 +161,20 @@ def test_apply_moves_endpoints_that_tracked_the_default_price() -> None:
 def test_apply_leaves_new_unpriced_models_without_pricing() -> None:
     upstream = {"openai/mystery": UpstreamModel(id="openai/mystery")}
     changes = diff_catalog({"models": []}, upstream, {"mystery"})
-    updated = apply_diff({"models": []}, upstream, changes)
+    updated = apply_diff({"models": []}, upstream, changes, add=["openai/mystery"])
     spec = updated["models"][0]
     assert spec["id"] == "openai/mystery"
+    # No price means downstream keeps it hidden rather than serving it for free.
     assert "pricing" not in spec
+
+
+def test_curated_catalog_does_not_grow_on_a_schedule() -> None:
+    # The real risk: hundreds of upstream models silently landing in the catalog.
+    upstream = {f"openai/model-{i}": UpstreamModel(id=f"openai/model-{i}") for i in range(50)}
+    changes = diff_catalog({"models": []}, upstream, set())
+    assert len(changes.candidates) == 50
+    assert changes.has_updates is False
+    assert apply_diff({"models": []}, upstream, changes)["models"] == []
 
 
 def test_apply_keeps_keys_in_canonical_order() -> None:
@@ -166,10 +185,12 @@ def test_apply_keeps_keys_in_canonical_order() -> None:
     assert list(spec) == ["id", "name", "pricing", "endpoints"]
 
 
-def test_report_flags_unpriced_additions() -> None:
-    changes = diff_catalog({"models": []}, {"a/b": UpstreamModel(id="a/b")}, {"b"})
-    report = render_report(changes)
-    assert "no price, stays hidden" in report
+def test_report_lists_candidates_without_claiming_they_were_added() -> None:
+    upstream = {"openai/new-thing": UpstreamModel(id="openai/new-thing")}
+    report = render_report(diff_catalog({"models": []}, upstream, set()))
+    assert "not carried" in report
+    assert "`openai/new-thing`" in report
+    assert "no upstream price" in report
 
 
 def test_report_is_quiet_when_in_sync() -> None:
