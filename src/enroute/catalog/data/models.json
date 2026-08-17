@@ -1,5 +1,5 @@
 {
-  "updated_at": "2026-08-17T00:00:00Z",
+  "updated_at": "2026-08-17T21:27:40Z",
   "models": [
     {
       "id": "anthropic/claude-fable-5",
@@ -157,6 +157,10 @@
       "id": "deepseek/deepseek-v4-flash",
       "name": "DeepSeek: V4 Flash",
       "context_length": 1000000,
+      "pricing": {
+        "prompt": "0.0000000742",
+        "completion": "0.0000001484"
+      },
       "architecture": {
         "modality": "text->text",
         "input_modalities": [
@@ -207,6 +211,10 @@
       "id": "deepseek/deepseek-v4-pro",
       "name": "DeepSeek: V4 Pro",
       "context_length": 1000000,
+      "pricing": {
+        "prompt": "0.00000066",
+        "completion": "0.00000198"
+      },
       "architecture": {
         "modality": "text->text",
         "input_modalities": [
@@ -295,8 +303,8 @@
       "name": "Google: Gemini 3.7 Flash",
       "context_length": 1048576,
       "pricing": {
-        "prompt": "0.00000075",
-        "completion": "0.00000375"
+        "prompt": "0.000000375",
+        "completion": "0.000001875"
       },
       "architecture": {
         "modality": "text+image->text",
@@ -321,8 +329,8 @@
           "region": "us",
           "upstream_id": "gemini-3.7-flash",
           "pricing": {
-            "prompt": "0.00000075",
-            "completion": "0.00000375"
+            "prompt": "0.000000375",
+            "completion": "0.000001875"
           }
         }
       ]
@@ -713,8 +721,8 @@
       "name": "OpenAI: GPT-5.6 Sol",
       "context_length": 1050000,
       "pricing": {
-        "prompt": "0.000005",
-        "completion": "0.00003"
+        "prompt": "0.0000025",
+        "completion": "0.000015"
       },
       "architecture": {
         "modality": "text+image->text",
@@ -742,8 +750,8 @@
           "region": "us",
           "upstream_id": "gpt-5.6-sol",
           "pricing": {
-            "prompt": "0.000005",
-            "completion": "0.00003"
+            "prompt": "0.0000025",
+            "completion": "0.000015"
           }
         }
       ]
@@ -792,6 +800,10 @@
       "id": "qwen/qwen3.7-plus",
       "name": "Qwen: 3.7 Plus",
       "context_length": 262144,
+      "pricing": {
+        "prompt": "0.00000032",
+        "completion": "0.00000128"
+      },
       "architecture": {
         "modality": "text+image->text",
         "input_modalities": [
