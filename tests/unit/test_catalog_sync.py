@@ -5,15 +5,45 @@ import pytest
 
 from enroute.catalog.sync import (
     OPENROUTER_MODELS_URL,
+    UpstreamEndpoint,
     UpstreamModel,
     apply_diff,
     collect_served_slugs,
     diff_catalog,
     fetch_openrouter,
     normalize_model_id,
+    normalize_region,
+    parse_endpoint_tag,
+    parse_endpoints,
     parse_openrouter,
     render_report,
+    standard_endpoints,
 )
+
+
+def host(
+    provider: str | None = "openai",
+    *,
+    region: str = "us",
+    tier: str = "standard",
+    prompt: float | None = 1e-6,
+    completion: float | None = 2e-6,
+    discount: float | None = None,
+    context_overrides: int = 0,
+    upstream_id: str = "gpt-x",
+) -> UpstreamEndpoint:
+    return UpstreamEndpoint(
+        provider=provider,
+        region=region,
+        tier=tier,
+        upstream_id=upstream_id,
+        prompt=prompt,
+        completion=completion,
+        discount=discount,
+        context_overrides=context_overrides,
+        tag=f"{provider}/{region}",
+    )
+
 
 CURRENT = {
     "updated_at": "2026-01-01T00:00:00Z",
@@ -23,6 +53,14 @@ CURRENT = {
             "name": "OpenAI: GPT-X",
             "context_length": 128000,
             "pricing": {"prompt": "0.000001", "completion": "0.000002"},
+            "endpoints": [
+                {
+                    "provider": "openai",
+                    "region": "us",
+                    "upstream_id": "gpt-x",
+                    "pricing": {"prompt": "0.000001", "completion": "0.000002"},
+                }
+            ],
         },
         {
             "id": "openai/retired",
@@ -38,6 +76,13 @@ CURRENT = {
     ],
 }
 
+# gpt-x completion moved; no-price has no hosts; retired is gone upstream.
+ENDPOINTS = {
+    "openai/gpt-x": [host(completion=4e-6)],
+    "openai/no-price": [],
+    "openai/retired": [],
+}
+
 UPSTREAM = {
     "openai/gpt-x": UpstreamModel(
         id="openai/gpt-x", prompt=1e-6, completion=4e-6, name="OpenAI: GPT-X"
@@ -48,6 +93,122 @@ UPSTREAM = {
     ),
     "acme/unknown-author": UpstreamModel(id="acme/unknown-author", prompt=1e-6, completion=1e-6),
 }
+
+
+def test_endpoint_tags_split_into_provider_region_and_tier() -> None:
+    assert parse_endpoint_tag("openai") == ("openai", "us", "standard")
+    assert parse_endpoint_tag("openai/flex") == ("openai", "us", "flex")
+    assert parse_endpoint_tag("azure/eu") == ("azure", "eu", "standard")
+    assert parse_endpoint_tag("amazon-bedrock/us-east-1") == ("bedrock", "us", "standard")
+    assert parse_endpoint_tag("google-vertex/global/priority") == ("vertex", "global", "priority")
+    assert parse_endpoint_tag("google-ai-studio") == ("google", "us", "standard")
+    # An unmapped vendor is reported rather than guessed at.
+    assert parse_endpoint_tag("some-new-cloud")[0] is None
+
+
+def test_quantized_and_program_variants_are_not_standard() -> None:
+    # A 4-bit deployment is a different product and must not set the model's rate.
+    assert parse_endpoint_tag("baseten/fp4") == ("baseten", "us", "fp4")
+    assert parse_endpoint_tag("together/fp8")[2] == "fp8"
+    assert parse_endpoint_tag("amazon-bedrock/claude-on-aws") == (
+        "bedrock",
+        "us",
+        "claude-on-aws",
+    )
+    hosts = [host("baseten", tier="fp4", prompt=1e-9), host("baseten", prompt=5e-6)]
+    assert standard_endpoints(hosts)[("baseten", "us")].prompt == 5e-6
+
+
+def test_normalize_region_collapses_vendor_labels() -> None:
+    assert normalize_region("us-east-1") == "us"
+    assert normalize_region("europe-west4") == "eu"
+    assert normalize_region("global") == "global"
+
+
+def test_parse_endpoints_records_list_price_not_promo_price() -> None:
+    # This is the bug the rework exists to prevent: /models reports 0.0000025 with
+    # no discount field, while the real OpenAI list rate is 0.000005.
+    payload = {
+        "data": {
+            "id": "openai/gpt-5.6-sol",
+            "endpoints": [
+                {
+                    "name": "OpenAI | openai/gpt-5.6-sol-20260709",
+                    "tag": "openai",
+                    "pricing": {
+                        "prompt": "0.0000025",
+                        "completion": "0.000015",
+                        "discount": 0.5,
+                        "overrides": [{"min_prompt_tokens": 272000, "prompt": "0.000005"}],
+                    },
+                },
+                {
+                    "name": "Azure | openai/gpt-5.6-sol",
+                    "tag": "azure/eu",
+                    "pricing": {"prompt": "0.0000055", "completion": "0.000033"},
+                },
+            ],
+        }
+    }
+    endpoints = parse_endpoints(payload)
+    openai_host, azure_host = endpoints
+
+    assert openai_host.prompt == 5e-6
+    assert openai_host.completion == 3e-5
+    assert openai_host.discount == 0.5
+    assert openai_host.context_overrides == 1
+    assert openai_host.upstream_id == "gpt-5.6-sol-20260709"
+    # An undiscounted host is recorded as-is.
+    assert azure_host.provider == "azure"
+    assert azure_host.region == "eu"
+    assert azure_host.prompt == 5.5e-6
+
+
+def test_standard_endpoints_excludes_service_tiers() -> None:
+    hosts = [
+        host(prompt=5e-6),
+        host(tier="flex", prompt=2.5e-6),
+        host(tier="priority", prompt=1e-5),
+        host(None, prompt=1e-9),
+        host("azure", prompt=None, completion=None),
+    ]
+    indexed = standard_endpoints(hosts)
+    # Flex is genuinely cheaper but is a different service level, and an unmapped
+    # or unpriced host cannot be billed.
+    assert list(indexed) == [("openai", "us")]
+    assert indexed[("openai", "us")].prompt == 5e-6
+
+
+def test_diff_flags_promotions_and_prompt_length_pricing() -> None:
+    endpoints = {"openai/gpt-x": [host(discount=0.5, context_overrides=2)]}
+    changes = diff_catalog(CURRENT, UPSTREAM, set(), endpoints_by_model=endpoints)
+    assert changes.discounted == ["openai/gpt-x"]
+    assert changes.tiered == ["openai/gpt-x"]
+    report = render_report(changes)
+    assert "Running a promotion upstream" in report
+    assert "Prompt-length pricing not captured" in report
+
+
+def test_diff_reports_hosts_we_do_not_list() -> None:
+    endpoints = {
+        "openai/gpt-x": [
+            host(),
+            host("azure", region="eu"),
+            host("bedrock", region="us"),
+        ]
+    }
+    changes = diff_catalog(CURRENT, UPSTREAM, set(), endpoints_by_model=endpoints)
+    assert changes.new_hosts == [("openai/gpt-x", "azure/eu"), ("openai/gpt-x", "bedrock/us")]
+    # Reporting a host must not silently add or reprice it.
+    spec = apply_diff(CURRENT, UPSTREAM, changes)["models"][0]
+    assert len(spec.get("endpoints", [])) <= 1
+
+
+def test_diff_says_nothing_when_the_endpoint_lookup_fails() -> None:
+    # A failed HTTP call must not read as "upstream dropped every price".
+    changes = diff_catalog(CURRENT, UPSTREAM, set(), endpoints_by_model={})
+    assert changes.repriced == []
+    assert changes.has_updates is False
 
 
 def test_normalize_strips_account_paths() -> None:
@@ -77,14 +238,17 @@ def test_parse_openrouter_handles_unpriced_models() -> None:
 
 def test_diff_detects_price_drift_and_candidates() -> None:
     served = {"gpt-x", "brand-new", "no-price"}
-    changes = diff_catalog(CURRENT, UPSTREAM, served, providers_checked=["openai"])
+    changes = diff_catalog(
+        CURRENT, UPSTREAM, served, providers_checked=["openai"], endpoints_by_model=ENDPOINTS
+    )
 
     assert [c.id for c in changes.candidates] == ["openai/brand-new"]
-    assert changes.removed == ["openai/retired"]
+    assert changes.removed == ["openai/no-price", "openai/retired"]
     assert changes.unpriced == ["openai/no-price"]
-    # Only the completion rate moved.
-    assert [(c.id, c.field_name, c.new) for c in changes.repriced] == [
-        ("openai/gpt-x", "completion", 4e-6)
+    # Only completion moved, on the host and on the model default that tracks it.
+    assert [(c.id, c.host, c.field_name, c.new) for c in changes.repriced] == [
+        ("openai/gpt-x", "openai/us", "completion", 4e-6),
+        ("openai/gpt-x", "default", "completion", 4e-6),
     ]
     assert changes.has_updates is True
 
@@ -105,12 +269,12 @@ def test_diff_proposes_only_routable_authors_when_unconfirmed() -> None:
 
 
 def test_apply_reprices_without_adding_candidates() -> None:
-    served = {"gpt-x", "brand-new", "no-price"}
-    changes = diff_catalog(CURRENT, UPSTREAM, served)
+    changes = diff_catalog(CURRENT, UPSTREAM, set(), endpoints_by_model=ENDPOINTS)
     updated = apply_diff(CURRENT, UPSTREAM, changes)
     entries = {spec["id"]: spec for spec in updated["models"]}
 
     assert entries["openai/gpt-x"]["pricing"]["completion"] == "0.000004"
+    assert entries["openai/gpt-x"]["endpoints"][0]["pricing"]["completion"] == "0.000004"
     # A curated catalog does not grow on its own.
     assert "openai/brand-new" not in entries
     # Removals stay put so we never silently break a caller.
@@ -126,36 +290,44 @@ def test_apply_adds_only_requested_models() -> None:
     assert "acme/unknown-author" not in entries
 
 
-def test_apply_moves_endpoints_that_tracked_the_default_price() -> None:
+def test_apply_reprices_only_the_host_that_moved() -> None:
     current = {
         "models": [
             {
                 "id": "openai/gpt-x",
                 "pricing": {"prompt": "0.000001", "completion": "0.000002"},
                 "endpoints": [
-                    # Tracking the default, so it must move.
                     {
                         "provider": "openai",
+                        "region": "us",
                         "upstream_id": "gpt-x",
                         "pricing": {"prompt": "0.000001", "completion": "0.000002"},
                     },
-                    # A cheaper host with its own rate, which must not move.
                     {
-                        "provider": "fireworks",
+                        "provider": "azure",
+                        "region": "eu",
                         "upstream_id": "gpt-x",
-                        "pricing": {"prompt": "0.0000005", "completion": "0.000002"},
+                        "pricing": {"prompt": "0.0000011", "completion": "0.0000022"},
                     },
                 ],
             }
         ]
     }
-    upstream = {"openai/gpt-x": UpstreamModel(id="openai/gpt-x", prompt=9e-6, completion=2e-6)}
-    changes = diff_catalog(current, upstream, set())
+    upstream = {"openai/gpt-x": UpstreamModel(id="openai/gpt-x")}
+    endpoints = {
+        "openai/gpt-x": [
+            host(prompt=9e-6, completion=2e-6),
+            host("azure", region="eu", prompt=1.1e-6, completion=2.2e-6),
+        ]
+    }
+    changes = diff_catalog(current, upstream, set(), endpoints_by_model=endpoints)
     spec = apply_diff(current, upstream, changes)["models"][0]
 
-    assert spec["pricing"]["prompt"] == "0.000009"
     assert spec["endpoints"][0]["pricing"]["prompt"] == "0.000009"
-    assert spec["endpoints"][1]["pricing"]["prompt"] == "0.0000005"
+    # Azure did not move, so its rate is untouched.
+    assert spec["endpoints"][1]["pricing"]["prompt"] == "0.0000011"
+    # The default tracks the first host.
+    assert spec["pricing"]["prompt"] == "0.000009"
 
 
 def test_apply_leaves_new_unpriced_models_without_pricing() -> None:
@@ -179,8 +351,9 @@ def test_curated_catalog_does_not_grow_on_a_schedule() -> None:
 
 def test_apply_keeps_keys_in_canonical_order() -> None:
     current = {"models": [{"id": "openai/gpt-x", "endpoints": [], "name": "GPT-X"}]}
-    upstream = {"openai/gpt-x": UpstreamModel(id="openai/gpt-x", prompt=1e-6, completion=2e-6)}
-    changes = diff_catalog(current, upstream, set())
+    upstream = {"openai/gpt-x": UpstreamModel(id="openai/gpt-x")}
+    endpoints = {"openai/gpt-x": [host()]}
+    changes = diff_catalog(current, upstream, set(), endpoints_by_model=endpoints)
     spec = apply_diff(current, upstream, changes)["models"][0]
     assert list(spec) == ["id", "name", "pricing", "endpoints"]
 

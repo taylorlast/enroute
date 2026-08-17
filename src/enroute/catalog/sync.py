@@ -1,21 +1,21 @@
 """Refresh the bundled model catalog from upstream sources.
 
-The catalog ships as static JSON so pricing changes are reviewable in git. This
-module rebuilds that file from two inputs:
+The catalog ships as static JSON so pricing changes are reviewable in git.
 
-* OpenRouter's public model list supplies canonical ``author/slug`` ids, context
-  windows, modalities, and per-token pricing.
-* Each configured provider's own model listing confirms we can actually serve a
-  model today. Providers are optional; without keys, models are still proposed
-  but flagged as unconfirmed.
+Prices come from OpenRouter's per-model ``/endpoints`` response rather than its
+``/models`` list. The list response reports the price a caller pays *after* any
+promotion and omits the ``discount`` field entirely, so reading it would bake a
+temporary discount in as if it were the standard rate. When the promotion ends,
+the catalog would still bill the discounted price while the provider charges
+full, and the difference comes out of our margin. ``/endpoints`` exposes
+``discount``, which lets us record the undiscounted list price.
 
-Pricing is pass-through, so a model with no price must never go live. New models
-are written without pricing when none can be resolved, which leaves them
-unavailable until a human fills the rate in.
+Only standard-tier endpoints set pricing. Flex and priority are separate service
+levels with their own rates, so folding them into one number would misprice
+whichever tier we did not pick.
 
-Upstream price changes are applied automatically because a stale rate bills the
-wrong amount on every request. Adding a model is deliberate, since the catalog is
-curated rather than a mirror of everything available.
+Pricing is pass-through, so a model with no price must never go live. Anything we
+cannot price is left unpriced, which keeps it unavailable downstream.
 
 Run it with::
 
@@ -29,6 +29,7 @@ from __future__ import annotations
 import argparse
 import json
 import os
+import re
 from collections.abc import Iterable, Mapping
 from dataclasses import dataclass, field
 from datetime import datetime, timezone
@@ -76,6 +77,35 @@ OPENAI_COMPATIBLE_BASES: dict[str, str] = {
 ANTHROPIC_MODELS_URL = "https://api.anthropic.com/v1/models"
 ANTHROPIC_VERSION = "2023-06-01"
 GOOGLE_MODELS_URL = "https://generativelanguage.googleapis.com/v1beta/models"
+
+# OpenRouter endpoint tags look like ``provider[/qualifier...]``, where a
+# qualifier is either a service tier or a region.
+PROVIDER_TAG_MAP: dict[str, str] = {
+    "openai": "openai",
+    "azure": "azure",
+    "amazon-bedrock": "bedrock",
+    "anthropic": "anthropic",
+    "google-vertex": "vertex",
+    "google-ai-studio": "google",
+    "google": "google",
+    "fireworks": "fireworks",
+    "baseten": "baseten",
+    "together": "together",
+    "groq": "groq",
+    "deepseek": "deepseek",
+    "mistral": "mistral",
+    "moonshot": "moonshot",
+    "xai": "xai",
+    "qwen": "qwen",
+    "alibaba": "qwen",
+    "zhipu": "zhipu",
+    "z-ai": "zhipu",
+    "meta": "meta",
+}
+SERVICE_TIERS = frozenset({"flex", "priority", "batch", "scale"})
+STANDARD_TIER = "standard"
+_REGION_PREFIXES = ("us", "eu", "europe", "global", "ap", "asia", "sa", "ca", "me", "af")
+_REGION_PATTERN = re.compile(r"^[a-z]{2}-[a-z]+-?\d*$")
 
 
 def normalize_model_id(model_id: str) -> str:
@@ -169,6 +199,224 @@ class UpstreamModel:
         return self.prompt is not None and self.completion is not None
 
 
+def is_region(qualifier: str) -> bool:
+    """Decide whether an endpoint tag qualifier names a region.
+
+    Args:
+        qualifier: A segment after the provider in an endpoint tag.
+
+    Returns:
+        ``True`` when the segment looks like a region rather than a variant.
+
+    Examples:
+        >>> is_region("us-east-1"), is_region("global"), is_region("fp8")
+        (True, True, False)
+    """
+    lowered = qualifier.lower()
+    if lowered.startswith(_REGION_PREFIXES):
+        return True
+    return bool(_REGION_PATTERN.match(lowered))
+
+
+def parse_endpoint_tag(tag: str) -> tuple[str | None, str, str]:
+    """Split an OpenRouter endpoint tag into provider, region, and service tier.
+
+    A qualifier that is neither a known service tier nor region-shaped is a
+    deployment variant: quantizations such as ``fp8`` and ``fp4``, or program
+    names such as ``claude-on-aws``. Those are returned as the tier so they are
+    excluded from pricing, since a 4-bit deployment is not the same product as
+    the full-precision model and must not set its rate.
+
+    Args:
+        tag: Endpoint tag such as ``azure/eu`` or ``openai/flex``.
+
+    Returns:
+        A triple of (provider slug or ``None`` when unmapped, region, tier).
+
+    Examples:
+        >>> parse_endpoint_tag("amazon-bedrock/us-east-1")
+        ('bedrock', 'us', 'standard')
+        >>> parse_endpoint_tag("openai/flex")
+        ('openai', 'us', 'flex')
+        >>> parse_endpoint_tag("baseten/fp4")
+        ('baseten', 'us', 'fp4')
+    """
+    parts = [part for part in tag.split("/") if part]
+    if not parts:
+        return None, "us", STANDARD_TIER
+    provider = PROVIDER_TAG_MAP.get(parts[0])
+    region = "us"
+    tier = STANDARD_TIER
+    for qualifier in parts[1:]:
+        if qualifier in SERVICE_TIERS or not is_region(qualifier):
+            tier = qualifier
+        else:
+            region = normalize_region(qualifier)
+    return provider, region, tier
+
+
+def normalize_region(value: str) -> str:
+    """Collapse a vendor region label to the catalog's coarse regions.
+
+    Args:
+        value: Region label such as ``us-east-1`` or ``global``.
+
+    Returns:
+        A short region key.
+
+    Examples:
+        >>> normalize_region("us-east-1"), normalize_region("europe-west4")
+        ('us', 'eu')
+    """
+    lowered = value.lower()
+    if lowered.startswith("us"):
+        return "us"
+    if lowered.startswith(("eu", "europe")):
+        return "eu"
+    if lowered.startswith("global"):
+        return "global"
+    return lowered
+
+
+@dataclass(frozen=True)
+class UpstreamEndpoint:
+    """A single inference host as OpenRouter describes it.
+
+    Attributes:
+        provider: Catalog provider slug, or ``None`` when the tag is unmapped.
+        region: Coarse region key.
+        tier: Service tier. Only ``standard`` is used for catalog pricing.
+        upstream_id: Model id the host expects.
+        prompt: Undiscounted USD per prompt token.
+        completion: Undiscounted USD per completion token.
+        discount: Promotional fraction OpenRouter applied, if any.
+        context_overrides: Conditional rates, typically long-context tiers.
+        tag: Raw upstream tag, kept for reporting unmapped hosts.
+    """
+
+    provider: str | None
+    region: str
+    tier: str
+    upstream_id: str
+    prompt: float | None
+    completion: float | None
+    discount: float | None
+    context_overrides: int
+    tag: str
+
+    @property
+    def priced(self) -> bool:
+        """Whether both token prices are known.
+
+        Returns:
+            ``True`` when the endpoint can be billed pass-through.
+        """
+        return self.prompt is not None and self.completion is not None
+
+
+def _undiscount(rate: float | None, discount: float | None) -> float | None:
+    """Recover a list price from a discounted rate.
+
+    Args:
+        rate: Price a caller currently pays.
+        discount: Fraction taken off the list price.
+
+    Returns:
+        The undiscounted list price.
+
+    Examples:
+        >>> _undiscount(2.5, 0.5)
+        5.0
+        >>> _undiscount(2.5, None)
+        2.5
+    """
+    if rate is None:
+        return None
+    if not discount or discount >= 1:
+        return rate
+    return rate / (1 - discount)
+
+
+def parse_endpoints(payload: Mapping[str, Any]) -> list[UpstreamEndpoint]:
+    """Convert an OpenRouter ``/endpoints`` payload into host records.
+
+    Args:
+        payload: Decoded ``/api/v1/models/{id}/endpoints`` response.
+
+    Returns:
+        Every host described upstream, with list rather than promotional prices.
+    """
+    data = payload.get("data") or {}
+    model_id = data.get("id") or ""
+    fallback_id = model_id.split("/", 1)[1] if "/" in model_id else model_id
+    endpoints: list[UpstreamEndpoint] = []
+    for entry in data.get("endpoints") or []:
+        tag = entry.get("tag") or ""
+        provider, region, tier = parse_endpoint_tag(tag)
+        pricing = entry.get("pricing") or {}
+        discount = pricing.get("discount")
+        name = entry.get("name") or ""
+        upstream_id = name.split("|", 1)[1].strip() if "|" in name else fallback_id
+        if "/" in upstream_id:
+            upstream_id = upstream_id.rsplit("/", 1)[1]
+        endpoints.append(
+            UpstreamEndpoint(
+                provider=provider,
+                region=region,
+                tier=tier,
+                upstream_id=upstream_id or fallback_id,
+                prompt=_undiscount(_price(pricing.get("prompt")), discount),
+                completion=_undiscount(_price(pricing.get("completion")), discount),
+                discount=discount if isinstance(discount, (int, float)) else None,
+                context_overrides=len(pricing.get("overrides") or []),
+                tag=tag,
+            )
+        )
+    return endpoints
+
+
+def fetch_endpoints(client: httpx.Client, model_id: str) -> list[UpstreamEndpoint]:
+    """Fetch the hosts OpenRouter lists for one model.
+
+    Args:
+        client: HTTP client to use.
+        model_id: Canonical ``author/slug`` id.
+
+    Returns:
+        Host records, empty when the model is unknown upstream.
+    """
+    try:
+        response = client.get(f"{OPENROUTER_MODELS_URL}/{model_id}/endpoints")
+        response.raise_for_status()
+    except httpx.HTTPError:
+        return []
+    return parse_endpoints(response.json())
+
+
+def standard_endpoints(
+    endpoints: Iterable[UpstreamEndpoint],
+) -> dict[tuple[str, str], UpstreamEndpoint]:
+    """Index priced standard-tier hosts by provider and region.
+
+    Args:
+        endpoints: Host records for one model.
+
+    Returns:
+        Mapping of (provider, region) to endpoint, cheapest kept on collision.
+    """
+    indexed: dict[tuple[str, str], UpstreamEndpoint] = {}
+    for endpoint in endpoints:
+        if endpoint.provider is None or endpoint.tier != STANDARD_TIER:
+            continue
+        if not endpoint.priced:
+            continue
+        key = (endpoint.provider, endpoint.region)
+        current = indexed.get(key)
+        if current is None or (endpoint.prompt or 0) < (current.prompt or 0):
+            indexed[key] = endpoint
+    return indexed
+
+
 @dataclass(frozen=True)
 class PriceChange:
     """A per-token price that moved upstream.
@@ -177,13 +425,28 @@ class PriceChange:
         id: Model id.
         field_name: Which rate changed (``prompt`` or ``completion``).
         old: Price currently in the catalog.
-        new: Price reported upstream.
+        new: Undiscounted list price reported upstream.
+        provider: Host the rate belongs to, or ``None`` for the model default.
+        region: Host region, or ``None`` for the model default.
     """
 
     id: str
     field_name: str
     old: float | None
     new: float | None
+    provider: str | None = None
+    region: str | None = None
+
+    @property
+    def host(self) -> str:
+        """Human-readable host label.
+
+        Returns:
+            ``provider/region``, or ``default`` for the model-level price.
+        """
+        if self.provider is None:
+            return "default"
+        return f"{self.provider}/{self.region}"
 
 
 @dataclass
@@ -198,6 +461,11 @@ class CatalogDiff:
         unpriced: Catalog ids with no usable price, which stay hidden.
         unconfirmed: Catalog ids no configured provider currently lists.
         providers_checked: Provider slugs whose listings were fetched.
+        discounted: Model ids where upstream is running a promotion. Recorded so a
+            reviewer can see we deliberately kept the list price.
+        tiered: Model ids whose upstream pricing varies by prompt length, which
+            this flat schema cannot express.
+        new_hosts: Hosts upstream offers for models we carry but we do not list.
     """
 
     candidates: list[UpstreamModel] = field(default_factory=list)
@@ -206,6 +474,9 @@ class CatalogDiff:
     unpriced: list[str] = field(default_factory=list)
     unconfirmed: list[str] = field(default_factory=list)
     providers_checked: list[str] = field(default_factory=list)
+    discounted: list[str] = field(default_factory=list)
+    tiered: list[str] = field(default_factory=list)
+    new_hosts: list[tuple[str, str]] = field(default_factory=list)
 
     @property
     def has_updates(self) -> bool:
@@ -346,12 +617,39 @@ def _catalog_prices(spec: Mapping[str, Any]) -> tuple[float | None, float | None
     return _price(pricing.get("prompt")), _price(pricing.get("completion"))
 
 
+def _endpoint_key(endpoint: Mapping[str, Any]) -> tuple[str, str]:
+    """Identify a catalog endpoint by provider and region.
+
+    Args:
+        endpoint: An ``endpoints`` entry from ``models.json``.
+
+    Returns:
+        A (provider, region) key.
+    """
+    return str(endpoint.get("provider") or ""), str(endpoint.get("region") or "us")
+
+
+def _default_host(spec: Mapping[str, Any]) -> tuple[str, str] | None:
+    """Find the host whose rate the model-level price should track.
+
+    Args:
+        spec: A catalog entry.
+
+    Returns:
+        The first endpoint's (provider, region) key, or ``None``.
+    """
+    for endpoint in spec.get("endpoints") or []:
+        return _endpoint_key(endpoint)
+    return None
+
+
 def diff_catalog(
     current: Mapping[str, Any],
     upstream: Mapping[str, UpstreamModel],
     served: set[str],
     *,
     providers_checked: Iterable[str] = (),
+    endpoints_by_model: Mapping[str, list[UpstreamEndpoint]] | None = None,
 ) -> CatalogDiff:
     """Compare the bundled catalog against upstream.
 
@@ -361,12 +659,16 @@ def diff_catalog(
         served: Normalized slugs configured providers report. Empty means
             availability could not be confirmed, so nothing is filtered on it.
         providers_checked: Provider slugs that answered.
+        endpoints_by_model: Per-model host records. Models absent from this
+            mapping are skipped for repricing rather than assumed unchanged, so a
+            failed lookup never looks like a price drop.
 
     Returns:
         The differences a human needs to review.
     """
     result = CatalogDiff(providers_checked=sorted(providers_checked))
     entries = {spec["id"]: spec for spec in current.get("models", [])}
+    hosts_by_model = endpoints_by_model or {}
 
     for model_id, spec in sorted(entries.items()):
         prompt, completion = _catalog_prices(spec)
@@ -374,16 +676,62 @@ def diff_catalog(
             result.unpriced.append(model_id)
         if served and normalize_model_id(model_id) not in served:
             result.unconfirmed.append(model_id)
-        candidate = upstream.get(model_id)
-        if candidate is None:
+
+        hosts = hosts_by_model.get(model_id)
+        if hosts is None:
+            # Nothing upstream to compare against; say nothing rather than guess.
+            if model_id not in upstream:
+                result.removed.append(model_id)
+            continue
+        if not hosts:
             result.removed.append(model_id)
             continue
-        if candidate.prompt is not None and candidate.prompt != prompt:
-            result.repriced.append(PriceChange(model_id, "prompt", prompt, candidate.prompt))
-        if candidate.completion is not None and candidate.completion != completion:
-            result.repriced.append(
-                PriceChange(model_id, "completion", completion, candidate.completion)
-            )
+
+        if any(host.discount for host in hosts):
+            result.discounted.append(model_id)
+        if any(host.context_overrides for host in hosts):
+            result.tiered.append(model_id)
+
+        indexed = standard_endpoints(hosts)
+        ours = {_endpoint_key(e): e for e in spec.get("endpoints") or []}
+        for key in sorted(indexed):
+            if key not in ours:
+                result.new_hosts.append((model_id, f"{key[0]}/{key[1]}"))
+
+        default_key = _default_host(spec)
+        for key, endpoint in sorted(indexed.items()):
+            existing = ours.get(key)
+            if existing is None:
+                continue
+            old_prompt, old_completion = _catalog_prices(existing)
+            provider, region = key
+            if endpoint.prompt is not None and endpoint.prompt != old_prompt:
+                result.repriced.append(
+                    PriceChange(model_id, "prompt", old_prompt, endpoint.prompt, provider, region)
+                )
+            if endpoint.completion is not None and endpoint.completion != old_completion:
+                result.repriced.append(
+                    PriceChange(
+                        model_id,
+                        "completion",
+                        old_completion,
+                        endpoint.completion,
+                        provider,
+                        region,
+                    )
+                )
+
+        # The model-level price advertises the default host's rate.
+        reference = indexed.get(default_key) if default_key else None
+        if reference is None and len(indexed) == 1:
+            reference = next(iter(indexed.values()))
+        if reference is not None:
+            if reference.prompt is not None and reference.prompt != prompt:
+                result.repriced.append(PriceChange(model_id, "prompt", prompt, reference.prompt))
+            if reference.completion is not None and reference.completion != completion:
+                result.repriced.append(
+                    PriceChange(model_id, "completion", completion, reference.completion)
+                )
 
     for model_id, candidate in sorted(upstream.items()):
         if model_id in entries:
@@ -495,16 +843,18 @@ def apply_diff(
         if spec is None:
             continue
         formatted = f"{change.new:.10f}".rstrip("0")
-        pricing = dict(spec.get("pricing") or {})
-        pricing[change.field_name] = formatted
-        spec["pricing"] = pricing
-        # pricing_for() prefers the endpoint rate, so a host that was tracking the
-        # default has to move with it. Hosts with their own rate are left alone.
+        if change.provider is None:
+            pricing = dict(spec.get("pricing") or {})
+            pricing[change.field_name] = formatted
+            spec["pricing"] = pricing
+            continue
+        # pricing_for() prefers the endpoint rate, so the host that actually moved
+        # is the one to edit. Other hosts keep their own rates.
         endpoints = []
         for endpoint in spec.get("endpoints") or []:
             updated = dict(endpoint)
-            host_pricing = dict(updated.get("pricing") or {})
-            if host_pricing and _price(host_pricing.get(change.field_name)) == change.old:
+            if _endpoint_key(updated) == (change.provider, change.region):
+                host_pricing = dict(updated.get("pricing") or {})
                 host_pricing[change.field_name] = formatted
                 updated["pricing"] = host_pricing
             endpoints.append(updated)
@@ -544,8 +894,36 @@ def render_report(changes: CatalogDiff) -> str:
 
     if changes.repriced:
         lines.append(f"### Repriced ({len(changes.repriced)})")
+        lines.append("Undiscounted list prices, so a promotion never lowers what we bill.")
         for change in changes.repriced:
-            lines.append(f"- `{change.id}` {change.field_name}: {change.old} → {change.new}")
+            lines.append(
+                f"- `{change.id}` [{change.host}] {change.field_name}: {change.old} → {change.new}"
+            )
+        lines.append("")
+    if changes.discounted:
+        lines.append(f"### Running a promotion upstream ({len(changes.discounted)})")
+        lines.append(
+            "OpenRouter is discounting these. We record the list price, so our rate "
+            "stays correct when the promotion ends."
+        )
+        for model_id in changes.discounted:
+            lines.append(f"- `{model_id}`")
+        lines.append("")
+    if changes.tiered:
+        lines.append(f"### Prompt-length pricing not captured ({len(changes.tiered)})")
+        lines.append(
+            "Upstream charges more above a prompt-token threshold. The catalog stores "
+            "one flat rate, so long requests on these are billed at the short-prompt "
+            "price and the difference is ours."
+        )
+        for model_id in changes.tiered:
+            lines.append(f"- `{model_id}`")
+        lines.append("")
+    if changes.new_hosts:
+        lines.append(f"### Hosts we do not list ({len(changes.new_hosts)})")
+        lines.append("Available upstream for models we already carry.")
+        for model_id, host in changes.new_hosts:
+            lines.append(f"- `{model_id}` — {host}")
         lines.append("")
     if changes.removed:
         lines.append(f"### No longer listed upstream ({len(changes.removed)})")
@@ -630,11 +1008,21 @@ def main(argv: list[str] | None = None) -> int:
     args = parser.parse_args(argv)
 
     current = load_catalog(args.path)
+    carried = [spec["id"] for spec in current.get("models", [])]
     with httpx.Client(timeout=30.0, follow_redirects=True) as client:
         upstream = fetch_openrouter(client)
         served, checked = collect_served_slugs(client)
+        # Only models we carry need per-host detail; the list response is enough
+        # to enumerate candidates.
+        endpoints_by_model = {model_id: fetch_endpoints(client, model_id) for model_id in carried}
 
-    changes = diff_catalog(current, upstream, served, providers_checked=checked)
+    changes = diff_catalog(
+        current,
+        upstream,
+        served,
+        providers_checked=checked,
+        endpoints_by_model=endpoints_by_model,
+    )
     report = render_report(changes)
     print(report)
     if args.report:
