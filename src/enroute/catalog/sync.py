@@ -38,6 +38,8 @@ from typing import Any
 
 import httpx
 
+from enroute.catalog.models import normalize_region
+
 OPENROUTER_MODELS_URL = "https://openrouter.ai/api/v1/models"
 DATA_PATH = Path(__file__).resolve().parent / "data" / "models.json"
 
@@ -255,27 +257,19 @@ def parse_endpoint_tag(tag: str) -> tuple[str | None, str, str]:
     return provider, region, tier
 
 
-def normalize_region(value: str) -> str:
-    """Collapse a vendor region label to the catalog's coarse regions.
+@dataclass(frozen=True)
+class UpstreamTier:
+    """A long-prompt rate that supersedes the base rate.
 
-    Args:
-        value: Region label such as ``us-east-1`` or ``global``.
-
-    Returns:
-        A short region key.
-
-    Examples:
-        >>> normalize_region("us-east-1"), normalize_region("europe-west4")
-        ('us', 'eu')
+    Attributes:
+        min_prompt_tokens: Prompt size at which the rate takes over.
+        prompt: Undiscounted USD per prompt token.
+        completion: Undiscounted USD per completion token.
     """
-    lowered = value.lower()
-    if lowered.startswith("us"):
-        return "us"
-    if lowered.startswith(("eu", "europe")):
-        return "eu"
-    if lowered.startswith("global"):
-        return "global"
-    return lowered
+
+    min_prompt_tokens: int
+    prompt: float
+    completion: float
 
 
 @dataclass(frozen=True)
@@ -290,7 +284,7 @@ class UpstreamEndpoint:
         prompt: Undiscounted USD per prompt token.
         completion: Undiscounted USD per completion token.
         discount: Promotional fraction OpenRouter applied, if any.
-        context_overrides: Conditional rates, typically long-context tiers.
+        tiers: Prompt-length rates, ordered by threshold.
         tag: Raw upstream tag, kept for reporting unmapped hosts.
     """
 
@@ -301,7 +295,7 @@ class UpstreamEndpoint:
     prompt: float | None
     completion: float | None
     discount: float | None
-    context_overrides: int
+    tiers: tuple[UpstreamTier, ...]
     tag: str
 
     @property
@@ -337,6 +331,33 @@ def _undiscount(rate: float | None, discount: float | None) -> float | None:
     return rate / (1 - discount)
 
 
+def parse_tiers(pricing: Mapping[str, Any], discount: float | None) -> tuple[UpstreamTier, ...]:
+    """Read prompt-length rates from an endpoint's pricing block.
+
+    A tier is only usable if both rates are present, since billing one side at the
+    long-prompt rate and the other at the base rate matches neither.
+
+    Args:
+        pricing: The endpoint's ``pricing`` mapping.
+        discount: Promotional fraction to divide back out.
+
+    Returns:
+        Tiers ordered by threshold.
+    """
+    tiers: list[UpstreamTier] = []
+    for override in pricing.get("overrides") or []:
+        threshold = override.get("min_prompt_tokens")
+        prompt = _undiscount(_price(override.get("prompt")), discount)
+        completion = _undiscount(_price(override.get("completion")), discount)
+        if threshold is None or prompt is None or completion is None:
+            continue
+        tiers.append(
+            UpstreamTier(min_prompt_tokens=int(threshold), prompt=prompt, completion=completion)
+        )
+    tiers.sort(key=lambda tier: tier.min_prompt_tokens)
+    return tuple(tiers)
+
+
 def parse_endpoints(payload: Mapping[str, Any]) -> list[UpstreamEndpoint]:
     """Convert an OpenRouter ``/endpoints`` payload into host records.
 
@@ -368,7 +389,7 @@ def parse_endpoints(payload: Mapping[str, Any]) -> list[UpstreamEndpoint]:
                 prompt=_undiscount(_price(pricing.get("prompt")), discount),
                 completion=_undiscount(_price(pricing.get("completion")), discount),
                 discount=discount if isinstance(discount, (int, float)) else None,
-                context_overrides=len(pricing.get("overrides") or []),
+                tiers=parse_tiers(pricing, discount),
                 tag=tag,
             )
         )
@@ -449,6 +470,47 @@ class PriceChange:
         return f"{self.provider}/{self.region}"
 
 
+@dataclass(frozen=True)
+class TierChange:
+    """Prompt-length rates that differ from what the catalog records.
+
+    Attributes:
+        id: Model id.
+        tiers: Tiers reported upstream, at list prices.
+        provider: Host the tiers belong to, or ``None`` for the model default.
+        region: Host region, or ``None`` for the model default.
+    """
+
+    id: str
+    tiers: tuple[UpstreamTier, ...]
+    provider: str | None = None
+    region: str | None = None
+
+    @property
+    def host(self) -> str:
+        """Human-readable host label.
+
+        Returns:
+            ``provider/region``, or ``default`` for the model-level price.
+        """
+        if self.provider is None:
+            return "default"
+        return f"{self.provider}/{self.region}"
+
+    def describe(self) -> str:
+        """Summarize the thresholds and rates for a review body.
+
+        Returns:
+            A human-readable description, or a note that tiers were dropped.
+        """
+        if not self.tiers:
+            return "no prompt-length pricing"
+        return ", ".join(
+            f"above {tier.min_prompt_tokens:,} tokens: {tier.prompt}/{tier.completion}"
+            for tier in self.tiers
+        )
+
+
 @dataclass
 class CatalogDiff:
     """What the sync found relative to the bundled catalog.
@@ -463,8 +525,7 @@ class CatalogDiff:
         providers_checked: Provider slugs whose listings were fetched.
         discounted: Model ids where upstream is running a promotion. Recorded so a
             reviewer can see we deliberately kept the list price.
-        tiered: Model ids whose upstream pricing varies by prompt length, which
-            this flat schema cannot express.
+        retiered: Prompt-length rates that differ from the catalog's.
         new_hosts: Hosts upstream offers for models we carry but we do not list.
     """
 
@@ -475,7 +536,7 @@ class CatalogDiff:
     unconfirmed: list[str] = field(default_factory=list)
     providers_checked: list[str] = field(default_factory=list)
     discounted: list[str] = field(default_factory=list)
-    tiered: list[str] = field(default_factory=list)
+    retiered: list[TierChange] = field(default_factory=list)
     new_hosts: list[tuple[str, str]] = field(default_factory=list)
 
     @property
@@ -483,9 +544,9 @@ class CatalogDiff:
         """Whether anything would be written without an explicit request.
 
         Returns:
-            ``True`` when a price moved upstream.
+            ``True`` when a rate moved upstream.
         """
-        return bool(self.repriced)
+        return bool(self.repriced or self.retiered)
 
     @property
     def empty(self) -> bool:
@@ -494,7 +555,7 @@ class CatalogDiff:
         Returns:
             ``True`` when the catalog matches upstream and nothing is pending.
         """
-        return not (self.candidates or self.removed or self.repriced)
+        return not (self.candidates or self.removed or self.repriced or self.retiered)
 
 
 def parse_openrouter(payload: Mapping[str, Any]) -> dict[str, UpstreamModel]:
@@ -629,6 +690,39 @@ def _endpoint_key(endpoint: Mapping[str, Any]) -> tuple[str, str]:
     return str(endpoint.get("provider") or ""), str(endpoint.get("region") or "us")
 
 
+def _catalog_tiers(entry: Mapping[str, Any]) -> tuple[tuple[int, float, float], ...]:
+    """Read prompt-length rates already recorded for a model or endpoint.
+
+    Args:
+        entry: A catalog entry or one of its ``endpoints`` items.
+
+    Returns:
+        Comparable (threshold, prompt, completion) triples ordered by threshold.
+    """
+    pricing = entry.get("pricing") or {}
+    tiers: list[tuple[int, float, float]] = []
+    for item in pricing.get("tiers") or []:
+        threshold = item.get("min_prompt_tokens")
+        prompt = _price(item.get("prompt"))
+        completion = _price(item.get("completion"))
+        if threshold is None or prompt is None or completion is None:
+            continue
+        tiers.append((int(threshold), prompt, completion))
+    return tuple(sorted(tiers))
+
+
+def _comparable(tiers: Iterable[UpstreamTier]) -> tuple[tuple[int, float, float], ...]:
+    """Put upstream tiers in the same shape as catalog tiers.
+
+    Args:
+        tiers: Upstream tier records.
+
+    Returns:
+        Comparable triples ordered by threshold.
+    """
+    return tuple(sorted((t.min_prompt_tokens, t.prompt, t.completion) for t in tiers))
+
+
 def _default_host(spec: Mapping[str, Any]) -> tuple[str, str] | None:
     """Find the host whose rate the model-level price should track.
 
@@ -689,8 +783,6 @@ def diff_catalog(
 
         if any(host.discount for host in hosts):
             result.discounted.append(model_id)
-        if any(host.context_overrides for host in hosts):
-            result.tiered.append(model_id)
 
         indexed = standard_endpoints(hosts)
         ours = {_endpoint_key(e): e for e in spec.get("endpoints") or []}
@@ -705,6 +797,8 @@ def diff_catalog(
                 continue
             old_prompt, old_completion = _catalog_prices(existing)
             provider, region = key
+            if _catalog_tiers(existing) != _comparable(endpoint.tiers):
+                result.retiered.append(TierChange(model_id, endpoint.tiers, provider, region))
             if endpoint.prompt is not None and endpoint.prompt != old_prompt:
                 result.repriced.append(
                     PriceChange(model_id, "prompt", old_prompt, endpoint.prompt, provider, region)
@@ -726,6 +820,8 @@ def diff_catalog(
         if reference is None and len(indexed) == 1:
             reference = next(iter(indexed.values()))
         if reference is not None:
+            if _catalog_tiers(spec) != _comparable(reference.tiers):
+                result.retiered.append(TierChange(model_id, reference.tiers))
             if reference.prompt is not None and reference.prompt != prompt:
                 result.repriced.append(PriceChange(model_id, "prompt", prompt, reference.prompt))
             if reference.completion is not None and reference.completion != completion:
@@ -809,6 +905,25 @@ def _spec_from_upstream(model: UpstreamModel) -> dict[str, Any]:
     return spec
 
 
+def _with_tiers(pricing: Mapping[str, Any] | None, tiers: list[dict[str, Any]]) -> dict[str, Any]:
+    """Attach prompt-length rates to a pricing block.
+
+    Args:
+        pricing: Existing pricing mapping, if any.
+        tiers: Serialized tiers to record.
+
+    Returns:
+        A new pricing mapping. The key is dropped when there are no tiers, so a
+        model that stops pricing long context does not keep a stale threshold.
+    """
+    updated = dict(pricing or {})
+    if tiers:
+        updated["tiers"] = tiers
+    else:
+        updated.pop("tiers", None)
+    return updated
+
+
 def apply_diff(
     current: Mapping[str, Any],
     upstream: Mapping[str, UpstreamModel],
@@ -866,6 +981,30 @@ def apply_diff(
         if endpoints:
             spec["endpoints"] = endpoints
 
+    for tier_change in changes.retiered:
+        spec = entries.get(tier_change.id)
+        if spec is None:
+            continue
+        payload = [
+            {
+                "min_prompt_tokens": tier.min_prompt_tokens,
+                "prompt": f"{tier.prompt:.10f}".rstrip("0"),
+                "completion": f"{tier.completion:.10f}".rstrip("0"),
+            }
+            for tier in tier_change.tiers
+        ]
+        if tier_change.provider is None:
+            spec["pricing"] = _with_tiers(spec.get("pricing"), payload)
+            continue
+        endpoints = []
+        for endpoint in spec.get("endpoints") or []:
+            updated = dict(endpoint)
+            if _endpoint_key(updated) == (tier_change.provider, tier_change.region):
+                updated["pricing"] = _with_tiers(updated.get("pricing"), payload)
+            endpoints.append(updated)
+        if endpoints:
+            spec["endpoints"] = endpoints
+
     for model_id in add:
         model = upstream.get(model_id)
         if model is not None:
@@ -886,10 +1025,20 @@ def apply_diff(
                         "provider": endpoint.provider,
                         "region": endpoint.region,
                         "upstream_id": endpoint.upstream_id,
-                        "pricing": {
-                            "prompt": f"{endpoint.prompt:.10f}".rstrip("0"),
-                            "completion": f"{endpoint.completion:.10f}".rstrip("0"),
-                        },
+                        "pricing": _with_tiers(
+                            {
+                                "prompt": f"{endpoint.prompt:.10f}".rstrip("0"),
+                                "completion": f"{endpoint.completion:.10f}".rstrip("0"),
+                            },
+                            [
+                                {
+                                    "min_prompt_tokens": tier.min_prompt_tokens,
+                                    "prompt": f"{tier.prompt:.10f}".rstrip("0"),
+                                    "completion": f"{tier.completion:.10f}".rstrip("0"),
+                                }
+                                for tier in endpoint.tiers
+                            ],
+                        ),
                     }
                 )
             if added:
@@ -938,15 +1087,14 @@ def render_report(changes: CatalogDiff) -> str:
         for model_id in changes.discounted:
             lines.append(f"- `{model_id}`")
         lines.append("")
-    if changes.tiered:
-        lines.append(f"### Prompt-length pricing not captured ({len(changes.tiered)})")
+    if changes.retiered:
+        lines.append(f"### Prompt-length pricing ({len(changes.retiered)})")
         lines.append(
-            "Upstream charges more above a prompt-token threshold. The catalog stores "
-            "one flat rate, so long requests on these are billed at the short-prompt "
-            "price and the difference is ours."
+            "These models charge a different rate above a prompt-token threshold. "
+            "The tier replaces the base rate for the whole request."
         )
-        for model_id in changes.tiered:
-            lines.append(f"- `{model_id}`")
+        for tier_change in changes.retiered:
+            lines.append(f"- `{tier_change.id}` [{tier_change.host}] {tier_change.describe()}")
         lines.append("")
     if changes.new_hosts:
         lines.append(f"### Hosts we do not list ({len(changes.new_hosts)})")

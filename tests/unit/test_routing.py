@@ -143,6 +143,33 @@ def test_unroutable_model_names_the_hosts_it_needs() -> None:
     assert "openai" in str(excinfo.value)
 
 
+def test_routes_carry_the_region_they_will_be_billed_at() -> None:
+    catalog = ModelCatalog()
+    req = ChatRequest(model="openai/gpt-5.6-sol", messages=[Message(role="user", content="hi")])
+    routes = Explicit().select(req, ["openai/gpt-5.6-sol"], catalog)
+    regions = {(r.provider, r.region) for r in routes}
+    assert ("azure", "eu") in regions and ("azure", "us") in regions
+
+
+def test_a_regional_provider_is_not_offered_other_regions() -> None:
+    # An EU-bound Azure resource must not be handed a US route, or we would bill
+    # the US rate for capacity we never called.
+    catalog = ModelCatalog()
+    eu_only = _StubProvider()
+    eu_only.name = "azure"
+    eu_only.region = "eu"
+    router = Router({"azure": eu_only}, catalog=catalog)
+    req = ChatRequest(model="openai/gpt-5.6-sol", messages=[Message(role="user", content="hi")])
+
+    routes = router._routes(req)
+    assert [(r.provider, r.region) for r in routes] == [("azure", "eu")]
+
+    us_only = _StubProvider()
+    us_only.name = "azure"
+    us_only.region = "us"
+    assert [r.region for r in Router({"azure": us_only}, catalog=catalog)._routes(req)] == ["us"]
+
+
 def test_gateway_mode_routes_all_models_through_enroute() -> None:
     gateway = _StubProvider()
     gateway.name = "enroute"

@@ -35,12 +35,15 @@ class ModelRoute(BaseModel):
     Attributes:
         model: Model id in ``author/slug`` form.
         provider: Host slug that should serve the request.
+        region: Host region. Carried through so billing can charge the region's
+            own rate rather than whichever one happens to be listed first.
         upstream_id: Model id the host expects, when different from ``model``.
         priority: Lower values are tried first.
     """
 
     model: str
     provider: str
+    region: str = "us"
     upstream_id: str | None = None
     priority: int = 0
 
@@ -107,6 +110,7 @@ def routes_for_model(
         ModelRoute(
             model=model_id,
             provider=endpoint.provider,
+            region=endpoint.region,
             upstream_id=endpoint.upstream_id,
             priority=priority_base + index,
         )

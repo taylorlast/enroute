@@ -1,5 +1,5 @@
 {
-  "updated_at": "2026-08-17T21:56:08Z",
+  "updated_at": "2026-08-17T22:29:22Z",
   "models": [
     {
       "id": "anthropic/claude-fable-5",
@@ -881,7 +881,14 @@
       "context_length": 1050000,
       "pricing": {
         "prompt": "0.000005",
-        "completion": "0.00003"
+        "completion": "0.00003",
+        "tiers": [
+          {
+            "min_prompt_tokens": 272000,
+            "prompt": "0.00001",
+            "completion": "0.000045"
+          }
+        ]
       },
       "architecture": {
         "modality": "text+image->text",
@@ -910,7 +917,14 @@
           "upstream_id": "gpt-5.6",
           "pricing": {
             "prompt": "0.000005",
-            "completion": "0.00003"
+            "completion": "0.00003",
+            "tiers": [
+              {
+                "min_prompt_tokens": 272000,
+                "prompt": "0.00001",
+                "completion": "0.000045"
+              }
+            ]
           }
         },
         {
@@ -919,7 +933,14 @@
           "upstream_id": "gpt-5.6-sol-20260709",
           "pricing": {
             "prompt": "0.0000055",
-            "completion": "0.000033"
+            "completion": "0.000033",
+            "tiers": [
+              {
+                "min_prompt_tokens": 272000,
+                "prompt": "0.000011",
+                "completion": "0.0000495"
+              }
+            ]
           }
         },
         {
@@ -928,7 +949,14 @@
           "upstream_id": "gpt-5.6-sol-20260709",
           "pricing": {
             "prompt": "0.000005",
-            "completion": "0.00003"
+            "completion": "0.00003",
+            "tiers": [
+              {
+                "min_prompt_tokens": 272000,
+                "prompt": "0.00001",
+                "completion": "0.000045"
+              }
+            ]
           }
         },
         {
@@ -937,7 +965,14 @@
           "upstream_id": "gpt-5.6-sol-20260709",
           "pricing": {
             "prompt": "0.0000055",
-            "completion": "0.000033"
+            "completion": "0.000033",
+            "tiers": [
+              {
+                "min_prompt_tokens": 272000,
+                "prompt": "0.000011",
+                "completion": "0.0000495"
+              }
+            ]
           }
         }
       ]
@@ -948,7 +983,14 @@
       "context_length": 1050000,
       "pricing": {
         "prompt": "0.0000002",
-        "completion": "0.0000012"
+        "completion": "0.0000012",
+        "tiers": [
+          {
+            "min_prompt_tokens": 272000,
+            "prompt": "0.0000004",
+            "completion": "0.0000018"
+          }
+        ]
       },
       "architecture": {
         "modality": "text+image->text",
@@ -977,7 +1019,14 @@
           "upstream_id": "gpt-5.6-luna",
           "pricing": {
             "prompt": "0.0000002",
-            "completion": "0.0000012"
+            "completion": "0.0000012",
+            "tiers": [
+              {
+                "min_prompt_tokens": 272000,
+                "prompt": "0.0000004",
+                "completion": "0.0000018"
+              }
+            ]
           }
         },
         {
@@ -986,7 +1035,14 @@
           "upstream_id": "gpt-5.6-luna-20260709",
           "pricing": {
             "prompt": "0.00000022",
-            "completion": "0.00000132"
+            "completion": "0.00000132",
+            "tiers": [
+              {
+                "min_prompt_tokens": 272000,
+                "prompt": "0.00000044",
+                "completion": "0.00000198"
+              }
+            ]
           }
         },
         {
@@ -995,7 +1051,14 @@
           "upstream_id": "gpt-5.6-luna-20260709",
           "pricing": {
             "prompt": "0.0000002",
-            "completion": "0.0000012"
+            "completion": "0.0000012",
+            "tiers": [
+              {
+                "min_prompt_tokens": 272000,
+                "prompt": "0.0000004",
+                "completion": "0.0000018"
+              }
+            ]
           }
         },
         {
@@ -1004,7 +1067,14 @@
           "upstream_id": "gpt-5.6-luna-20260709",
           "pricing": {
             "prompt": "0.00000022",
-            "completion": "0.00000132"
+            "completion": "0.00000132",
+            "tiers": [
+              {
+                "min_prompt_tokens": 272000,
+                "prompt": "0.00000044",
+                "completion": "0.00000198"
+              }
+            ]
           }
         }
       ]
@@ -1015,7 +1085,14 @@
       "context_length": 1050000,
       "pricing": {
         "prompt": "0.000005",
-        "completion": "0.00003"
+        "completion": "0.00003",
+        "tiers": [
+          {
+            "min_prompt_tokens": 272000,
+            "prompt": "0.00001",
+            "completion": "0.000045"
+          }
+        ]
       },
       "architecture": {
         "modality": "text+image->text",
@@ -1044,7 +1121,14 @@
           "upstream_id": "gpt-5.6-sol",
           "pricing": {
             "prompt": "0.000005",
-            "completion": "0.00003"
+            "completion": "0.00003",
+            "tiers": [
+              {
+                "min_prompt_tokens": 272000,
+                "prompt": "0.00001",
+                "completion": "0.000045"
+              }
+            ]
           }
         },
         {
@@ -1053,7 +1137,14 @@
           "upstream_id": "gpt-5.6-sol-20260709",
           "pricing": {
             "prompt": "0.0000055",
-            "completion": "0.000033"
+            "completion": "0.000033",
+            "tiers": [
+              {
+                "min_prompt_tokens": 272000,
+                "prompt": "0.000011",
+                "completion": "0.0000495"
+              }
+            ]
           }
         },
         {
@@ -1062,7 +1153,14 @@
           "upstream_id": "gpt-5.6-sol-20260709",
           "pricing": {
             "prompt": "0.000005",
-            "completion": "0.00003"
+            "completion": "0.00003",
+            "tiers": [
+              {
+                "min_prompt_tokens": 272000,
+                "prompt": "0.00001",
+                "completion": "0.000045"
+              }
+            ]
           }
         },
         {
@@ -1071,7 +1169,14 @@
           "upstream_id": "gpt-5.6-sol-20260709",
           "pricing": {
             "prompt": "0.0000055",
-            "completion": "0.000033"
+            "completion": "0.000033",
+            "tiers": [
+              {
+                "min_prompt_tokens": 272000,
+                "prompt": "0.000011",
+                "completion": "0.0000495"
+              }
+            ]
           }
         }
       ]
@@ -1082,7 +1187,14 @@
       "context_length": 1050000,
       "pricing": {
         "prompt": "0.000002",
-        "completion": "0.000012"
+        "completion": "0.000012",
+        "tiers": [
+          {
+            "min_prompt_tokens": 272000,
+            "prompt": "0.000004",
+            "completion": "0.000018"
+          }
+        ]
       },
       "architecture": {
         "modality": "text+image->text",
@@ -1111,7 +1223,14 @@
           "upstream_id": "gpt-5.6-terra",
           "pricing": {
             "prompt": "0.000002",
-            "completion": "0.000012"
+            "completion": "0.000012",
+            "tiers": [
+              {
+                "min_prompt_tokens": 272000,
+                "prompt": "0.000004",
+                "completion": "0.000018"
+              }
+            ]
           }
         },
         {
@@ -1120,7 +1239,14 @@
           "upstream_id": "gpt-5.6-terra-20260709",
           "pricing": {
             "prompt": "0.0000022",
-            "completion": "0.0000132"
+            "completion": "0.0000132",
+            "tiers": [
+              {
+                "min_prompt_tokens": 272000,
+                "prompt": "0.0000044",
+                "completion": "0.0000198"
+              }
+            ]
           }
         },
         {
@@ -1129,7 +1255,14 @@
           "upstream_id": "gpt-5.6-terra-20260709",
           "pricing": {
             "prompt": "0.000002",
-            "completion": "0.000012"
+            "completion": "0.000012",
+            "tiers": [
+              {
+                "min_prompt_tokens": 272000,
+                "prompt": "0.000004",
+                "completion": "0.000018"
+              }
+            ]
           }
         },
         {
@@ -1138,7 +1271,14 @@
           "upstream_id": "gpt-5.6-terra-20260709",
           "pricing": {
             "prompt": "0.0000022",
-            "completion": "0.0000132"
+            "completion": "0.0000132",
+            "tiers": [
+              {
+                "min_prompt_tokens": 272000,
+                "prompt": "0.0000044",
+                "completion": "0.0000198"
+              }
+            ]
           }
         }
       ]
@@ -1149,7 +1289,14 @@
       "context_length": 262144,
       "pricing": {
         "prompt": "0.00000032",
-        "completion": "0.00000128"
+        "completion": "0.00000128",
+        "tiers": [
+          {
+            "min_prompt_tokens": 256000,
+            "prompt": "0.00000096",
+            "completion": "0.00000384"
+          }
+        ]
       },
       "architecture": {
         "modality": "text+image->text",

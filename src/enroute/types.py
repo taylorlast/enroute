@@ -323,6 +323,8 @@ class ChatResponse(BaseModel):
         choices: Completion choices.
         usage: Token usage and optional cost.
         provider: Provider slug that served the request.
+        region: Region of the host that served it. The same provider charges
+            different rates per region, so billing needs both.
         created: Unix timestamp when the completion was created.
         raw: Original provider payload for debugging.
         latency_ms: End-to-end latency in milliseconds.
@@ -343,6 +345,7 @@ class ChatResponse(BaseModel):
     choices: list[Choice]
     usage: Usage = Field(default_factory=Usage)
     provider: str | None = None
+    region: str | None = None
     created: int | None = None
     raw: dict[str, Any] | None = None
     latency_ms: float | None = None
@@ -397,6 +400,7 @@ class StreamChunk(BaseModel):
         finish_reason: Present on the final chunk when known.
         usage: Usage, typically only on the final chunk.
         provider: Provider slug.
+        region: Region of the host serving the stream.
         raw: Original provider chunk payload.
     """
 
@@ -406,6 +410,7 @@ class StreamChunk(BaseModel):
     finish_reason: FinishReason | str | None = None
     usage: Usage | None = None
     provider: str | None = None
+    region: str | None = None
     raw: dict[str, Any] | None = None
 
 

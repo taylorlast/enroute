@@ -7,6 +7,7 @@ from enroute.catalog.sync import (
     OPENROUTER_MODELS_URL,
     UpstreamEndpoint,
     UpstreamModel,
+    UpstreamTier,
     apply_diff,
     collect_served_slugs,
     diff_catalog,
@@ -16,6 +17,7 @@ from enroute.catalog.sync import (
     parse_endpoint_tag,
     parse_endpoints,
     parse_openrouter,
+    parse_tiers,
     render_report,
     standard_endpoints,
 )
@@ -29,7 +31,7 @@ def host(
     prompt: float | None = 1e-6,
     completion: float | None = 2e-6,
     discount: float | None = None,
-    context_overrides: int = 0,
+    tiers: tuple[UpstreamTier, ...] = (),
     upstream_id: str = "gpt-x",
 ) -> UpstreamEndpoint:
     return UpstreamEndpoint(
@@ -40,7 +42,7 @@ def host(
         prompt=prompt,
         completion=completion,
         discount=discount,
-        context_overrides=context_overrides,
+        tiers=tiers,
         tag=f"{provider}/{region}",
     )
 
@@ -156,8 +158,9 @@ def test_parse_endpoints_records_list_price_not_promo_price() -> None:
     assert openai_host.prompt == 5e-6
     assert openai_host.completion == 3e-5
     assert openai_host.discount == 0.5
-    assert openai_host.context_overrides == 1
     assert openai_host.upstream_id == "gpt-5.6-sol-20260709"
+    # The override lacked a completion rate, so it cannot be billed as a tier.
+    assert openai_host.tiers == ()
     # An undiscounted host is recorded as-is.
     assert azure_host.provider == "azure"
     assert azure_host.region == "eu"
@@ -179,14 +182,80 @@ def test_standard_endpoints_excludes_service_tiers() -> None:
     assert indexed[("openai", "us")].prompt == 5e-6
 
 
-def test_diff_flags_promotions_and_prompt_length_pricing() -> None:
-    endpoints = {"openai/gpt-x": [host(discount=0.5, context_overrides=2)]}
+def test_parse_tiers_undiscounts_and_orders_thresholds() -> None:
+    pricing = {
+        "overrides": [
+            {"min_prompt_tokens": 500000, "prompt": "0.000008", "completion": "0.00004"},
+            {"min_prompt_tokens": 272000, "prompt": "0.0000025", "completion": "0.00001125"},
+            # No completion rate, so this one cannot be billed.
+            {"min_prompt_tokens": 100, "prompt": "0.000001"},
+        ]
+    }
+    tiers = parse_tiers(pricing, 0.5)
+    assert [t.min_prompt_tokens for t in tiers] == [272000, 500000]
+    assert tiers[0].prompt == 5e-6
+    assert tiers[0].completion == 2.25e-5
+
+
+def test_diff_flags_promotions() -> None:
+    endpoints = {"openai/gpt-x": [host(discount=0.5)]}
     changes = diff_catalog(CURRENT, UPSTREAM, set(), endpoints_by_model=endpoints)
     assert changes.discounted == ["openai/gpt-x"]
-    assert changes.tiered == ["openai/gpt-x"]
-    report = render_report(changes)
-    assert "Running a promotion upstream" in report
-    assert "Prompt-length pricing not captured" in report
+    assert "Running a promotion upstream" in render_report(changes)
+
+
+def test_prompt_length_tiers_are_recorded_per_host() -> None:
+    tier = UpstreamTier(min_prompt_tokens=272000, prompt=1e-5, completion=6e-5)
+    endpoints = {"openai/gpt-x": [host(tiers=(tier,))]}
+    changes = diff_catalog(CURRENT, UPSTREAM, set(), endpoints_by_model=endpoints)
+
+    assert [(c.id, c.host) for c in changes.retiered] == [
+        ("openai/gpt-x", "openai/us"),
+        ("openai/gpt-x", "default"),
+    ]
+    assert changes.has_updates is True
+    assert "above 272,000 tokens" in render_report(changes)
+
+    spec = next(
+        m for m in apply_diff(CURRENT, UPSTREAM, changes)["models"] if m["id"] == "openai/gpt-x"
+    )
+    assert spec["pricing"]["tiers"] == [
+        {"min_prompt_tokens": 272000, "prompt": "0.00001", "completion": "0.00006"}
+    ]
+    assert spec["endpoints"][0]["pricing"]["tiers"][0]["min_prompt_tokens"] == 272000
+
+
+def test_dropped_tiers_are_removed_not_left_stale() -> None:
+    current = {
+        "models": [
+            {
+                "id": "openai/gpt-x",
+                "pricing": {
+                    "prompt": "0.000001",
+                    "completion": "0.000002",
+                    "tiers": [
+                        {
+                            "min_prompt_tokens": 272000,
+                            "prompt": "0.00001",
+                            "completion": "0.00006",
+                        }
+                    ],
+                },
+                "endpoints": [
+                    {
+                        "provider": "openai",
+                        "region": "us",
+                        "upstream_id": "gpt-x",
+                        "pricing": {"prompt": "0.000001", "completion": "0.000002"},
+                    }
+                ],
+            }
+        ]
+    }
+    endpoints = {"openai/gpt-x": [host()]}
+    changes = diff_catalog(current, UPSTREAM, set(), endpoints_by_model=endpoints)
+    spec = apply_diff(current, UPSTREAM, changes)["models"][0]
+    assert "tiers" not in spec["pricing"]
 
 
 def test_diff_reports_hosts_we_do_not_list() -> None:

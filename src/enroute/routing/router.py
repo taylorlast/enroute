@@ -114,6 +114,7 @@ class Router:
                 ModelRoute(
                     model=route.model,
                     provider="enroute",
+                    region=route.region,
                     upstream_id=route.model,
                     priority=route.priority,
                 )
@@ -122,7 +123,7 @@ class Router:
         # The catalog lists every host a model has, including clouds this caller
         # holds no credentials for. Those are not routes, so drop them here rather
         # than failing mid-attempt and abandoning the hosts we can reach.
-        routable = [route for route in routes if route.provider in self.providers]
+        routable = [route for route in routes if self._serves(route)]
         if not routable:
             offered = sorted({route.provider for route in routes})
             raise ConfigurationError(
@@ -130,6 +131,26 @@ class Router:
                 model=request.model,
             )
         return routable
+
+    def _serves(self, route: ModelRoute) -> bool:
+        """Whether a configured provider can actually serve this route.
+
+        A cloud provider instance is bound to one region, and regional rates
+        differ. Accepting a route for a region the instance does not serve would
+        bill that region's price while calling somewhere else, so region is part
+        of the match whenever the adapter declares one.
+
+        Args:
+            route: A candidate route.
+
+        Returns:
+            ``True`` when the route is reachable as configured.
+        """
+        provider = self.providers.get(route.provider)
+        if provider is None:
+            return False
+        declared = getattr(provider, "region", None)
+        return declared is None or declared == route.region
 
     def _route_request(
         self, request: ChatRequest, route: ModelRoute, *, stream: bool
@@ -157,10 +178,12 @@ class Router:
         max_price = prefs.max_price if prefs else None
         # Soft check using catalog pricing with a nominal token estimate.
         spec = self.catalog.get(route.model)
-        pricing = spec.pricing_for(route.provider) if spec is not None else None
+        pricing = spec.pricing_for(route.provider, route.region) if spec is not None else None
         if spec is None or pricing is None:
             return
-        estimated = estimate_cost(Usage.from_counts(1000, 500), spec, provider=route.provider)
+        estimated = estimate_cost(
+            Usage.from_counts(1000, 500), spec, provider=route.provider, region=route.region
+        )
         if estimated is not None and estimated > self.max_cost_usd:
             raise BudgetExceededError(
                 f"estimated cost {estimated:.6f} exceeds budget {self.max_cost_usd}",
@@ -194,11 +217,17 @@ class Router:
         await asyncio.sleep(min(delay, 8.0))
 
     def _annotate_cost(self, response: ChatResponse, route: ModelRoute) -> ChatResponse:
-        cost = estimate_cost(response.usage, self.catalog.get(route.model), provider=route.provider)
+        cost = estimate_cost(
+            response.usage,
+            self.catalog.get(route.model),
+            provider=route.provider,
+            region=route.region,
+        )
         if cost is not None:
             response.usage.cost = cost
         response.model = route.model
         response.provider = route.provider
+        response.region = route.region
         return response
 
     def chat(self, request: ChatRequest) -> tuple[ChatResponse, list[AttemptRecord]]:
@@ -342,7 +371,11 @@ class Router:
                     if chunk.finish_reason:
                         finish = chunk.finish_reason
                     yield chunk.model_copy(
-                        update={"model": route.model, "provider": route.provider}
+                        update={
+                            "model": route.model,
+                            "provider": route.provider,
+                            "region": route.region,
+                        }
                     )
                 latency_ms = (time.perf_counter() - started) * 1000
                 attempts.append(AttemptRecord(route.model, route.provider, latency_ms=latency_ms))
@@ -419,7 +452,11 @@ class Router:
                     if chunk.finish_reason:
                         finish = chunk.finish_reason
                     yield chunk.model_copy(
-                        update={"model": route.model, "provider": route.provider}
+                        update={
+                            "model": route.model,
+                            "provider": route.provider,
+                            "region": route.region,
+                        }
                     )
                 latency_ms = (time.perf_counter() - started) * 1000
                 attempts.append(AttemptRecord(route.model, route.provider, latency_ms=latency_ms))

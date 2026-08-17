@@ -26,16 +26,90 @@ from enroute.types import Usage
 _US_HOST_ORDER = ("fireworks", "baseten")
 
 
+def normalize_region(value: str) -> str:
+    """Collapse a vendor region label to the catalog's coarse regions.
+
+    Vendors name regions at finer grain than pricing varies, so ``us-east-1`` and
+    ``us-west-2`` both bill as ``us``.
+
+    Args:
+        value: Region label such as ``us-east-1`` or ``europe-west4``.
+
+    Returns:
+        A short region key.
+
+    Examples:
+        >>> normalize_region("us-east-1"), normalize_region("europe-west4")
+        ('us', 'eu')
+        >>> normalize_region("global")
+        'global'
+    """
+    lowered = value.lower()
+    if lowered.startswith("us"):
+        return "us"
+    if lowered.startswith(("eu", "europe")):
+        return "eu"
+    if lowered.startswith("global"):
+        return "global"
+    return lowered
+
+
+class PriceTier(BaseModel):
+    """A rate that replaces the base rate once a prompt gets large enough.
+
+    Attributes:
+        min_prompt_tokens: Prompt size at which this tier starts applying.
+        prompt: USD per prompt token at this tier.
+        completion: USD per completion token at this tier.
+    """
+
+    min_prompt_tokens: int
+    prompt: float
+    completion: float
+
+
 class ModelPricing(BaseModel):
     """Per-token pricing in USD.
 
     Attributes:
-        prompt: USD per prompt token.
-        completion: USD per completion token.
+        prompt: USD per prompt token below the first tier threshold.
+        completion: USD per completion token below the first tier threshold.
+        tiers: Rates for larger prompts, if the model prices them differently.
     """
 
     prompt: float
     completion: float
+    tiers: list[PriceTier] = Field(default_factory=list)
+
+    def rates_for_prompt(self, prompt_tokens: int) -> tuple[float, float]:
+        """Resolve the rates that apply to a request of a given prompt size.
+
+        Providers that price long context replace the rate for the whole request
+        rather than charging a higher rate only on tokens past the threshold, so
+        the matching tier supersedes the base rate outright.
+
+        Args:
+            prompt_tokens: Prompt tokens in the request being billed.
+
+        Returns:
+            A (prompt rate, completion rate) pair.
+
+        Examples:
+            >>> pricing = ModelPricing(
+            ...     prompt=5e-06,
+            ...     completion=3e-05,
+            ...     tiers=[PriceTier(min_prompt_tokens=272000, prompt=1e-05, completion=6e-05)],
+            ... )
+            >>> pricing.rates_for_prompt(1000)
+            (5e-06, 3e-05)
+            >>> pricing.rates_for_prompt(300000)
+            (1e-05, 6e-05)
+        """
+        applicable = [tier for tier in self.tiers if prompt_tokens >= tier.min_prompt_tokens]
+        if not applicable:
+            return self.prompt, self.completion
+        tier = max(applicable, key=lambda item: item.min_prompt_tokens)
+        return tier.prompt, tier.completion
 
 
 class Architecture(BaseModel):
@@ -132,11 +206,19 @@ class ModelSpec(BaseModel):
         """Return host slugs that can serve this model."""
         return [endpoint.provider for endpoint in self.ordered_endpoints()]
 
-    def pricing_for(self, provider: str | None = None) -> ModelPricing | None:
+    def pricing_for(
+        self, provider: str | None = None, region: str | None = None
+    ) -> ModelPricing | None:
         """Return pricing for a host, or the default US-first price.
+
+        Region matters because the same provider charges different rates in
+        different regions: Azure EU lists above Azure US for identical models.
+        When a region is given it must match, so a miss falls back to the default
+        rather than billing a cheaper region's rate for a pricier one.
 
         Args:
             provider: Host slug. ``None`` uses the default endpoint.
+            region: Host region. ``None`` matches the first endpoint for the provider.
 
         Returns:
             Per-token pricing, or ``None``.
@@ -144,8 +226,11 @@ class ModelSpec(BaseModel):
         endpoints = self.ordered_endpoints()
         if provider:
             for endpoint in endpoints:
-                if endpoint.provider == provider and endpoint.pricing is not None:
-                    return endpoint.pricing
+                if endpoint.provider != provider or endpoint.pricing is None:
+                    continue
+                if region is not None and endpoint.region != region:
+                    continue
+                return endpoint.pricing
         if endpoints and endpoints[0].pricing is not None:
             return endpoints[0].pricing
         return self.pricing
@@ -156,6 +241,7 @@ def estimate_cost(
     spec: ModelSpec | None,
     *,
     provider: str | None = None,
+    region: str | None = None,
 ) -> float | None:
     """Estimate USD cost for a usage record against a model spec.
 
@@ -163,6 +249,7 @@ def estimate_cost(
         usage: Token usage.
         spec: Model catalog entry, or ``None``.
         provider: Optional host slug; bills at that host's pass-through price.
+        region: Optional host region, for providers whose rates vary by region.
 
     Returns:
         Estimated USD cost, or ``None`` if pricing is unavailable.
@@ -178,19 +265,61 @@ def estimate_cost(
     """
     if spec is None:
         return None
-    pricing = spec.pricing_for(provider)
+    pricing = spec.pricing_for(provider, region)
     if pricing is None:
         return None
-    return usage.prompt_tokens * pricing.prompt + usage.completion_tokens * pricing.completion
+    prompt_rate, completion_rate = pricing.rates_for_prompt(usage.prompt_tokens)
+    return usage.prompt_tokens * prompt_rate + usage.completion_tokens * completion_rate
+
+
+def _parse_tiers(raw: Any) -> list[PriceTier]:
+    tiers: list[PriceTier] = []
+    for item in raw or []:
+        try:
+            tiers.append(
+                PriceTier(
+                    min_prompt_tokens=int(item["min_prompt_tokens"]),
+                    prompt=float(item["prompt"]),
+                    completion=float(item["completion"]),
+                )
+            )
+        except (KeyError, TypeError, ValueError):
+            # A malformed tier must not silently become the base rate.
+            continue
+    tiers.sort(key=lambda tier: tier.min_prompt_tokens)
+    return tiers
 
 
 def _parse_pricing(raw: dict[str, Any] | None) -> ModelPricing | None:
     if not raw:
         return None
     try:
-        return ModelPricing(prompt=float(raw["prompt"]), completion=float(raw["completion"]))
+        return ModelPricing(
+            prompt=float(raw["prompt"]),
+            completion=float(raw["completion"]),
+            tiers=_parse_tiers(raw.get("tiers")),
+        )
     except (KeyError, TypeError, ValueError):
         return None
+
+
+def _dump_pricing(pricing: ModelPricing | None) -> dict[str, Any] | None:
+    if pricing is None:
+        return None
+    payload: dict[str, Any] = {
+        "prompt": str(pricing.prompt),
+        "completion": str(pricing.completion),
+    }
+    if pricing.tiers:
+        payload["tiers"] = [
+            {
+                "min_prompt_tokens": tier.min_prompt_tokens,
+                "prompt": str(tier.prompt),
+                "completion": str(tier.completion),
+            }
+            for tier in pricing.tiers
+        ]
+    return payload
 
 
 def _parse_endpoint(raw: dict[str, Any]) -> ModelEndpoint | None:
@@ -360,14 +489,7 @@ class ModelCatalog:
                     "id": spec.id,
                     "name": spec.name,
                     "context_length": spec.context_length,
-                    "pricing": (
-                        {
-                            "prompt": str(spec.pricing.prompt),
-                            "completion": str(spec.pricing.completion),
-                        }
-                        if spec.pricing
-                        else None
-                    ),
+                    "pricing": _dump_pricing(spec.pricing),
                     "architecture": spec.architecture.model_dump(),
                     "supported_parameters": spec.supported_parameters,
                     "endpoints": [
@@ -375,14 +497,7 @@ class ModelCatalog:
                             "provider": endpoint.provider,
                             "region": endpoint.region,
                             "upstream_id": endpoint.upstream_id,
-                            "pricing": (
-                                {
-                                    "prompt": str(endpoint.pricing.prompt),
-                                    "completion": str(endpoint.pricing.completion),
-                                }
-                                if endpoint.pricing
-                                else None
-                            ),
+                            "pricing": _dump_pricing(endpoint.pricing),
                         }
                         for endpoint in spec.endpoints
                     ],

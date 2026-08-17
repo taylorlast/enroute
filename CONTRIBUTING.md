@@ -85,9 +85,12 @@ Two kinds of upstream endpoint are deliberately excluded from pricing:
 - **Quantized deployments** such as `fp8` and `fp4` are cheaper because they are
   smaller, and pricing the full-precision model from them would misrepresent it.
 
-The sync also reports models whose upstream pricing changes above a prompt-token
-threshold. This schema stores one flat rate, so those requests bill low and the
-difference is absorbed. Fixing it properly needs tiered pricing in the schema.
+Models that charge more above a prompt-token threshold carry `pricing.tiers`, and
+those are synced like any other rate. A tier replaces the base rate for the whole
+request, matching how providers bill long context, so a 300k-token prompt is not
+charged at the short-prompt price. A tier is only recorded when upstream gives
+both a prompt and a completion rate for it; billing one side at the long-prompt
+rate and the other at the base rate would match neither.
 
 ## Release
 
