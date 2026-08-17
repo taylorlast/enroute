@@ -1,339 +1,156 @@
 {
-  "updated_at": "2026-08-17T00:00:00Z",
+  "updated_at": "2026-08-17T21:24:30Z",
   "models": [
-    {
-      "id": "openai/gpt-5.6-sol",
-      "name": "OpenAI: GPT-5.6 Sol",
-      "context_length": 1050000,
-      "pricing": {"prompt": "0.000005", "completion": "0.00003"},
-      "architecture": {
-        "modality": "text+image->text",
-        "input_modalities": ["text", "image"],
-        "output_modalities": ["text"]
-      },
-      "supported_parameters": ["temperature", "top_p", "max_tokens", "tools", "tool_choice", "response_format", "seed", "stop"],
-      "endpoints": [
-        {"provider": "openai", "region": "us", "upstream_id": "gpt-5.6-sol", "pricing": {"prompt": "0.000005", "completion": "0.00003"}}
-      ]
-    },
-    {
-      "id": "openai/gpt-5.6",
-      "name": "OpenAI: GPT-5.6",
-      "context_length": 1050000,
-      "pricing": {"prompt": "0.000005", "completion": "0.00003"},
-      "architecture": {
-        "modality": "text+image->text",
-        "input_modalities": ["text", "image"],
-        "output_modalities": ["text"]
-      },
-      "supported_parameters": ["temperature", "top_p", "max_tokens", "tools", "tool_choice", "response_format", "seed", "stop"],
-      "endpoints": [
-        {"provider": "openai", "region": "us", "upstream_id": "gpt-5.6", "pricing": {"prompt": "0.000005", "completion": "0.00003"}}
-      ]
-    },
-    {
-      "id": "openai/gpt-5.6-terra",
-      "name": "OpenAI: GPT-5.6 Terra",
-      "context_length": 1050000,
-      "pricing": {"prompt": "0.000002", "completion": "0.000012"},
-      "architecture": {
-        "modality": "text+image->text",
-        "input_modalities": ["text", "image"],
-        "output_modalities": ["text"]
-      },
-      "supported_parameters": ["temperature", "top_p", "max_tokens", "tools", "tool_choice", "response_format", "seed", "stop"],
-      "endpoints": [
-        {"provider": "openai", "region": "us", "upstream_id": "gpt-5.6-terra", "pricing": {"prompt": "0.000002", "completion": "0.000012"}}
-      ]
-    },
-    {
-      "id": "openai/gpt-5.6-luna",
-      "name": "OpenAI: GPT-5.6 Luna",
-      "context_length": 1050000,
-      "pricing": {"prompt": "0.0000002", "completion": "0.0000012"},
-      "architecture": {
-        "modality": "text+image->text",
-        "input_modalities": ["text", "image"],
-        "output_modalities": ["text"]
-      },
-      "supported_parameters": ["temperature", "top_p", "max_tokens", "tools", "tool_choice", "response_format", "seed", "stop"],
-      "endpoints": [
-        {"provider": "openai", "region": "us", "upstream_id": "gpt-5.6-luna", "pricing": {"prompt": "0.0000002", "completion": "0.0000012"}}
-      ]
-    },
     {
       "id": "anthropic/claude-fable-5",
       "name": "Anthropic: Claude Fable 5",
       "context_length": 1000000,
-      "pricing": {"prompt": "0.00001", "completion": "0.00005"},
+      "pricing": {
+        "prompt": "0.00001",
+        "completion": "0.00005"
+      },
       "architecture": {
         "modality": "text+image->text",
-        "input_modalities": ["text", "image"],
-        "output_modalities": ["text"]
+        "input_modalities": [
+          "text",
+          "image"
+        ],
+        "output_modalities": [
+          "text"
+        ]
       },
-      "supported_parameters": ["temperature", "top_p", "max_tokens", "tools", "tool_choice", "stop"],
+      "supported_parameters": [
+        "temperature",
+        "top_p",
+        "max_tokens",
+        "tools",
+        "tool_choice",
+        "stop"
+      ],
       "endpoints": [
-        {"provider": "anthropic", "region": "us", "upstream_id": "claude-fable-5", "pricing": {"prompt": "0.00001", "completion": "0.00005"}}
-      ]
-    },
-    {
-      "id": "anthropic/claude-opus-5",
-      "name": "Anthropic: Claude Opus 5",
-      "context_length": 1000000,
-      "pricing": {"prompt": "0.000005", "completion": "0.000025"},
-      "architecture": {
-        "modality": "text+image->text",
-        "input_modalities": ["text", "image"],
-        "output_modalities": ["text"]
-      },
-      "supported_parameters": ["temperature", "top_p", "max_tokens", "tools", "tool_choice", "stop"],
-      "endpoints": [
-        {"provider": "anthropic", "region": "us", "upstream_id": "claude-opus-5", "pricing": {"prompt": "0.000005", "completion": "0.000025"}}
-      ]
-    },
-    {
-      "id": "anthropic/claude-sonnet-5",
-      "name": "Anthropic: Claude Sonnet 5",
-      "context_length": 1000000,
-      "pricing": {"prompt": "0.000002", "completion": "0.00001"},
-      "architecture": {
-        "modality": "text+image->text",
-        "input_modalities": ["text", "image"],
-        "output_modalities": ["text"]
-      },
-      "supported_parameters": ["temperature", "top_p", "max_tokens", "tools", "tool_choice", "stop"],
-      "endpoints": [
-        {"provider": "anthropic", "region": "us", "upstream_id": "claude-sonnet-5", "pricing": {"prompt": "0.000002", "completion": "0.00001"}}
+        {
+          "provider": "anthropic",
+          "region": "us",
+          "upstream_id": "claude-fable-5",
+          "pricing": {
+            "prompt": "0.00001",
+            "completion": "0.00005"
+          }
+        }
       ]
     },
     {
       "id": "anthropic/claude-haiku-4-5",
       "name": "Anthropic: Claude Haiku 4.5",
       "context_length": 200000,
-      "pricing": {"prompt": "0.000001", "completion": "0.000005"},
+      "pricing": {
+        "prompt": "0.000001",
+        "completion": "0.000005"
+      },
       "architecture": {
         "modality": "text+image->text",
-        "input_modalities": ["text", "image"],
-        "output_modalities": ["text"]
+        "input_modalities": [
+          "text",
+          "image"
+        ],
+        "output_modalities": [
+          "text"
+        ]
       },
-      "supported_parameters": ["temperature", "top_p", "max_tokens", "tools", "tool_choice", "stop"],
+      "supported_parameters": [
+        "temperature",
+        "top_p",
+        "max_tokens",
+        "tools",
+        "tool_choice",
+        "stop"
+      ],
       "endpoints": [
-        {"provider": "anthropic", "region": "us", "upstream_id": "claude-haiku-4-5", "pricing": {"prompt": "0.000001", "completion": "0.000005"}}
+        {
+          "provider": "anthropic",
+          "region": "us",
+          "upstream_id": "claude-haiku-4-5",
+          "pricing": {
+            "prompt": "0.000001",
+            "completion": "0.000005"
+          }
+        }
       ]
     },
     {
-      "id": "google/gemini-3.7-flash",
-      "name": "Google: Gemini 3.7 Flash",
-      "context_length": 1048576,
-      "pricing": {"prompt": "0.00000075", "completion": "0.00000375"},
-      "architecture": {
-        "modality": "text+image->text",
-        "input_modalities": ["text", "image"],
-        "output_modalities": ["text"]
-      },
-      "supported_parameters": ["temperature", "top_p", "max_tokens", "tools", "stop"],
-      "endpoints": [
-        {"provider": "google", "region": "us", "upstream_id": "gemini-3.7-flash", "pricing": {"prompt": "0.00000075", "completion": "0.00000375"}}
-      ]
-    },
-    {
-      "id": "google/gemini-3.1-pro",
-      "name": "Google: Gemini 3.1 Pro",
-      "context_length": 1048576,
-      "pricing": {"prompt": "0.000002", "completion": "0.000012"},
-      "architecture": {
-        "modality": "text+image->text",
-        "input_modalities": ["text", "image"],
-        "output_modalities": ["text"]
-      },
-      "supported_parameters": ["temperature", "top_p", "max_tokens", "tools", "stop"],
-      "endpoints": [
-        {"provider": "google", "region": "us", "upstream_id": "gemini-3.1-pro", "pricing": {"prompt": "0.000002", "completion": "0.000012"}}
-      ]
-    },
-    {
-      "id": "xai/grok-4.6",
-      "name": "xAI: Grok 4.6",
-      "context_length": 500000,
-      "pricing": {"prompt": "0.000002", "completion": "0.000006"},
-      "architecture": {
-        "modality": "text+image->text",
-        "input_modalities": ["text", "image"],
-        "output_modalities": ["text"]
-      },
-      "supported_parameters": ["temperature", "top_p", "max_tokens", "tools", "stop"],
-      "endpoints": [
-        {"provider": "xai", "region": "us", "upstream_id": "grok-4.6", "pricing": {"prompt": "0.000002", "completion": "0.000006"}}
-      ]
-    },
-    {
-      "id": "xai/grok-4.3",
-      "name": "xAI: Grok 4.3",
+      "id": "anthropic/claude-opus-5",
+      "name": "Anthropic: Claude Opus 5",
       "context_length": 1000000,
-      "pricing": {"prompt": "0.00000125", "completion": "0.0000025"},
+      "pricing": {
+        "prompt": "0.000005",
+        "completion": "0.000025"
+      },
       "architecture": {
         "modality": "text+image->text",
-        "input_modalities": ["text", "image"],
-        "output_modalities": ["text"]
+        "input_modalities": [
+          "text",
+          "image"
+        ],
+        "output_modalities": [
+          "text"
+        ]
       },
-      "supported_parameters": ["temperature", "top_p", "max_tokens", "tools", "stop"],
+      "supported_parameters": [
+        "temperature",
+        "top_p",
+        "max_tokens",
+        "tools",
+        "tool_choice",
+        "stop"
+      ],
       "endpoints": [
-        {"provider": "xai", "region": "us", "upstream_id": "grok-4.3", "pricing": {"prompt": "0.00000125", "completion": "0.0000025"}}
+        {
+          "provider": "anthropic",
+          "region": "us",
+          "upstream_id": "claude-opus-5",
+          "pricing": {
+            "prompt": "0.000005",
+            "completion": "0.000025"
+          }
+        }
       ]
     },
     {
-      "id": "meta/muse-spark-1.2",
-      "name": "Meta: Muse Spark 1.2",
-      "context_length": 1048576,
-      "pricing": {"prompt": "0.00000125", "completion": "0.00000425"},
-      "architecture": {
-        "modality": "text+image->text",
-        "input_modalities": ["text", "image"],
-        "output_modalities": ["text"]
-      },
-      "supported_parameters": ["temperature", "top_p", "max_tokens", "tools", "tool_choice", "stop"],
-      "endpoints": [
-        {"provider": "meta", "region": "us", "upstream_id": "muse-spark-1.2", "pricing": {"prompt": "0.00000125", "completion": "0.00000425"}}
-      ]
-    },
-    {
-      "id": "meta/muse-spark-1.2-contributor",
-      "name": "Meta: Muse Spark 1.2 Contributor",
-      "context_length": 1048576,
-      "pricing": {"prompt": "0.0000001", "completion": "0.0000002"},
-      "architecture": {
-        "modality": "text+image->text",
-        "input_modalities": ["text", "image"],
-        "output_modalities": ["text"]
-      },
-      "supported_parameters": ["temperature", "top_p", "max_tokens", "tools", "tool_choice", "stop"],
-      "endpoints": [
-        {"provider": "meta", "region": "us", "upstream_id": "muse-spark-1.2-contributor", "pricing": {"prompt": "0.0000001", "completion": "0.0000002"}}
-      ]
-    },
-    {
-      "id": "mistral/mistral-large-latest",
-      "name": "Mistral: Large",
-      "context_length": 262144,
-      "pricing": {"prompt": "0.0000005", "completion": "0.0000015"},
-      "architecture": {
-        "modality": "text+image->text",
-        "input_modalities": ["text", "image"],
-        "output_modalities": ["text"]
-      },
-      "supported_parameters": ["temperature", "top_p", "max_tokens", "tools", "stop"],
-      "endpoints": [
-        {"provider": "mistral", "region": "us", "upstream_id": "mistral-large-latest", "pricing": {"prompt": "0.0000005", "completion": "0.0000015"}}
-      ]
-    },
-    {
-      "id": "mistral/magistral-medium-latest",
-      "name": "Mistral: Magistral Medium",
-      "context_length": 128000,
-      "pricing": {"prompt": "0.000002", "completion": "0.000005"},
-      "architecture": {
-        "modality": "text->text",
-        "input_modalities": ["text"],
-        "output_modalities": ["text"]
-      },
-      "supported_parameters": ["temperature", "top_p", "max_tokens", "tools", "stop"],
-      "endpoints": [
-        {"provider": "mistral", "region": "us", "upstream_id": "magistral-medium-latest", "pricing": {"prompt": "0.000002", "completion": "0.000005"}}
-      ]
-    },
-    {
-      "id": "moonshot/kimi-k3",
-      "name": "Moonshot: Kimi K3",
+      "id": "anthropic/claude-sonnet-5",
+      "name": "Anthropic: Claude Sonnet 5",
       "context_length": 1000000,
+      "pricing": {
+        "prompt": "0.000002",
+        "completion": "0.00001"
+      },
       "architecture": {
         "modality": "text+image->text",
-        "input_modalities": ["text", "image"],
-        "output_modalities": ["text"]
+        "input_modalities": [
+          "text",
+          "image"
+        ],
+        "output_modalities": [
+          "text"
+        ]
       },
-      "supported_parameters": ["temperature", "top_p", "max_tokens", "tools", "stop"],
+      "supported_parameters": [
+        "temperature",
+        "top_p",
+        "max_tokens",
+        "tools",
+        "tool_choice",
+        "stop"
+      ],
       "endpoints": [
-        {"provider": "fireworks", "region": "us", "upstream_id": "accounts/fireworks/models/kimi-k3", "pricing": {"prompt": "0.0000006", "completion": "0.0000025"}},
-        {"provider": "baseten", "region": "us", "upstream_id": "moonshotai/Kimi-K3", "pricing": {"prompt": "0.0000008", "completion": "0.000003"}},
-        {"provider": "moonshot", "region": "cn", "upstream_id": "kimi-k3", "pricing": {"prompt": "0.000003", "completion": "0.000015"}}
-      ]
-    },
-    {
-      "id": "moonshot/kimi-k2.6",
-      "name": "Moonshot: Kimi K2.6",
-      "context_length": 256000,
-      "architecture": {
-        "modality": "text+image->text",
-        "input_modalities": ["text", "image"],
-        "output_modalities": ["text"]
-      },
-      "supported_parameters": ["temperature", "top_p", "max_tokens", "tools", "stop"],
-      "endpoints": [
-        {"provider": "fireworks", "region": "us", "upstream_id": "accounts/fireworks/models/kimi-k2p6", "pricing": {"prompt": "0.0000006", "completion": "0.0000025"}},
-        {"provider": "baseten", "region": "us", "upstream_id": "moonshotai/Kimi-K2.6", "pricing": {"prompt": "0.0000006", "completion": "0.0000025"}},
-        {"provider": "moonshot", "region": "cn", "upstream_id": "kimi-k2.6", "pricing": {"prompt": "0.0000006", "completion": "0.0000025"}}
-      ]
-    },
-    {
-      "id": "moonshot/kimi-k2.7-code",
-      "name": "Moonshot: Kimi K2.7 Code",
-      "context_length": 256000,
-      "architecture": {
-        "modality": "text->text",
-        "input_modalities": ["text"],
-        "output_modalities": ["text"]
-      },
-      "supported_parameters": ["temperature", "top_p", "max_tokens", "tools", "stop"],
-      "endpoints": [
-        {"provider": "fireworks", "region": "us", "upstream_id": "accounts/fireworks/models/kimi-k2p7-code", "pricing": {"prompt": "0.0000006", "completion": "0.0000025"}},
-        {"provider": "baseten", "region": "us", "upstream_id": "moonshotai/Kimi-K2.7-Code", "pricing": {"prompt": "0.0000006", "completion": "0.0000025"}},
-        {"provider": "moonshot", "region": "cn", "upstream_id": "kimi-k2.7-code", "pricing": {"prompt": "0.0000006", "completion": "0.0000025"}}
-      ]
-    },
-    {
-      "id": "qwen/qwen3.7-plus",
-      "name": "Qwen: 3.7 Plus",
-      "context_length": 262144,
-      "architecture": {
-        "modality": "text+image->text",
-        "input_modalities": ["text", "image"],
-        "output_modalities": ["text"]
-      },
-      "supported_parameters": ["temperature", "top_p", "max_tokens", "tools", "stop"],
-      "endpoints": [
-        {"provider": "fireworks", "region": "us", "upstream_id": "accounts/fireworks/models/qwen3p7-plus", "pricing": {"prompt": "0.0000004", "completion": "0.0000016"}},
-        {"provider": "qwen", "region": "cn", "upstream_id": "qwen-plus", "pricing": {"prompt": "0.0000008", "completion": "0.000002"}}
-      ]
-    },
-    {
-      "id": "zhipu/glm-5.2",
-      "name": "Zhipu: GLM-5.2",
-      "context_length": 1000000,
-      "architecture": {
-        "modality": "text->text",
-        "input_modalities": ["text"],
-        "output_modalities": ["text"]
-      },
-      "supported_parameters": ["temperature", "top_p", "max_tokens", "tools", "stop"],
-      "endpoints": [
-        {"provider": "fireworks", "region": "us", "upstream_id": "accounts/fireworks/models/glm-5p2", "pricing": {"prompt": "0.0000014", "completion": "0.0000044"}},
-        {"provider": "baseten", "region": "us", "upstream_id": "zai-org/GLM-5.2", "pricing": {"prompt": "0.0000014", "completion": "0.0000044"}},
-        {"provider": "zhipu", "region": "cn", "upstream_id": "glm-5.2", "pricing": {"prompt": "0.0000014", "completion": "0.0000044"}}
-      ]
-    },
-    {
-      "id": "deepseek/deepseek-v4-pro",
-      "name": "DeepSeek: V4 Pro",
-      "context_length": 1000000,
-      "architecture": {
-        "modality": "text->text",
-        "input_modalities": ["text"],
-        "output_modalities": ["text"]
-      },
-      "supported_parameters": ["temperature", "top_p", "max_tokens", "tools", "stop"],
-      "endpoints": [
-        {"provider": "fireworks", "region": "us", "upstream_id": "accounts/fireworks/models/deepseek-v4-pro", "pricing": {"prompt": "0.00000174", "completion": "0.00000348"}},
-        {"provider": "baseten", "region": "us", "upstream_id": "deepseek-ai/DeepSeek-V4-Pro", "pricing": {"prompt": "0.0000005", "completion": "0.000001"}},
-        {"provider": "deepseek", "region": "cn", "upstream_id": "deepseek-v4-pro", "pricing": {"prompt": "0.000000435", "completion": "0.00000087"}}
+        {
+          "provider": "anthropic",
+          "region": "us",
+          "upstream_id": "claude-sonnet-5",
+          "pricing": {
+            "prompt": "0.000002",
+            "completion": "0.00001"
+          }
+        }
       ]
     },
     {
@@ -342,14 +159,811 @@
       "context_length": 1000000,
       "architecture": {
         "modality": "text->text",
-        "input_modalities": ["text"],
-        "output_modalities": ["text"]
+        "input_modalities": [
+          "text"
+        ],
+        "output_modalities": [
+          "text"
+        ]
       },
-      "supported_parameters": ["temperature", "top_p", "max_tokens", "tools", "stop"],
+      "supported_parameters": [
+        "temperature",
+        "top_p",
+        "max_tokens",
+        "tools",
+        "stop"
+      ],
       "endpoints": [
-        {"provider": "fireworks", "region": "us", "upstream_id": "accounts/fireworks/models/deepseek-v4-flash", "pricing": {"prompt": "0.00000014", "completion": "0.00000028"}},
-        {"provider": "baseten", "region": "us", "upstream_id": "deepseek-ai/DeepSeek-V4-Flash-0731", "pricing": {"prompt": "0.00000016", "completion": "0.00000032"}},
-        {"provider": "deepseek", "region": "cn", "upstream_id": "deepseek-v4-flash", "pricing": {"prompt": "0.00000014", "completion": "0.00000028"}}
+        {
+          "provider": "fireworks",
+          "region": "us",
+          "upstream_id": "accounts/fireworks/models/deepseek-v4-flash",
+          "pricing": {
+            "prompt": "0.00000014",
+            "completion": "0.00000028"
+          }
+        },
+        {
+          "provider": "baseten",
+          "region": "us",
+          "upstream_id": "deepseek-ai/DeepSeek-V4-Flash-0731",
+          "pricing": {
+            "prompt": "0.00000016",
+            "completion": "0.00000032"
+          }
+        },
+        {
+          "provider": "deepseek",
+          "region": "cn",
+          "upstream_id": "deepseek-v4-flash",
+          "pricing": {
+            "prompt": "0.00000014",
+            "completion": "0.00000028"
+          }
+        }
+      ],
+      "pricing": {
+        "prompt": "0.0000000742",
+        "completion": "0.0000001484"
+      }
+    },
+    {
+      "id": "deepseek/deepseek-v4-pro",
+      "name": "DeepSeek: V4 Pro",
+      "context_length": 1000000,
+      "architecture": {
+        "modality": "text->text",
+        "input_modalities": [
+          "text"
+        ],
+        "output_modalities": [
+          "text"
+        ]
+      },
+      "supported_parameters": [
+        "temperature",
+        "top_p",
+        "max_tokens",
+        "tools",
+        "stop"
+      ],
+      "endpoints": [
+        {
+          "provider": "fireworks",
+          "region": "us",
+          "upstream_id": "accounts/fireworks/models/deepseek-v4-pro",
+          "pricing": {
+            "prompt": "0.00000174",
+            "completion": "0.00000348"
+          }
+        },
+        {
+          "provider": "baseten",
+          "region": "us",
+          "upstream_id": "deepseek-ai/DeepSeek-V4-Pro",
+          "pricing": {
+            "prompt": "0.0000005",
+            "completion": "0.000001"
+          }
+        },
+        {
+          "provider": "deepseek",
+          "region": "cn",
+          "upstream_id": "deepseek-v4-pro",
+          "pricing": {
+            "prompt": "0.000000435",
+            "completion": "0.00000087"
+          }
+        }
+      ],
+      "pricing": {
+        "prompt": "0.00000066",
+        "completion": "0.00000198"
+      }
+    },
+    {
+      "id": "google/gemini-3.1-pro",
+      "name": "Google: Gemini 3.1 Pro",
+      "context_length": 1048576,
+      "pricing": {
+        "prompt": "0.000002",
+        "completion": "0.000012"
+      },
+      "architecture": {
+        "modality": "text+image->text",
+        "input_modalities": [
+          "text",
+          "image"
+        ],
+        "output_modalities": [
+          "text"
+        ]
+      },
+      "supported_parameters": [
+        "temperature",
+        "top_p",
+        "max_tokens",
+        "tools",
+        "stop"
+      ],
+      "endpoints": [
+        {
+          "provider": "google",
+          "region": "us",
+          "upstream_id": "gemini-3.1-pro",
+          "pricing": {
+            "prompt": "0.000002",
+            "completion": "0.000012"
+          }
+        }
+      ]
+    },
+    {
+      "id": "google/gemini-3.7-flash",
+      "name": "Google: Gemini 3.7 Flash",
+      "context_length": 1048576,
+      "pricing": {
+        "prompt": "0.000000375",
+        "completion": "0.000001875"
+      },
+      "architecture": {
+        "modality": "text+image->text",
+        "input_modalities": [
+          "text",
+          "image"
+        ],
+        "output_modalities": [
+          "text"
+        ]
+      },
+      "supported_parameters": [
+        "temperature",
+        "top_p",
+        "max_tokens",
+        "tools",
+        "stop"
+      ],
+      "endpoints": [
+        {
+          "provider": "google",
+          "region": "us",
+          "upstream_id": "gemini-3.7-flash",
+          "pricing": {
+            "prompt": "0.000000375",
+            "completion": "0.000001875"
+          }
+        }
+      ]
+    },
+    {
+      "id": "meta/muse-spark-1.2",
+      "name": "Meta: Muse Spark 1.2",
+      "context_length": 1048576,
+      "pricing": {
+        "prompt": "0.00000125",
+        "completion": "0.00000425"
+      },
+      "architecture": {
+        "modality": "text+image->text",
+        "input_modalities": [
+          "text",
+          "image"
+        ],
+        "output_modalities": [
+          "text"
+        ]
+      },
+      "supported_parameters": [
+        "temperature",
+        "top_p",
+        "max_tokens",
+        "tools",
+        "tool_choice",
+        "stop"
+      ],
+      "endpoints": [
+        {
+          "provider": "meta",
+          "region": "us",
+          "upstream_id": "muse-spark-1.2",
+          "pricing": {
+            "prompt": "0.00000125",
+            "completion": "0.00000425"
+          }
+        }
+      ]
+    },
+    {
+      "id": "meta/muse-spark-1.2-contributor",
+      "name": "Meta: Muse Spark 1.2 Contributor",
+      "context_length": 1048576,
+      "pricing": {
+        "prompt": "0.0000001",
+        "completion": "0.0000002"
+      },
+      "architecture": {
+        "modality": "text+image->text",
+        "input_modalities": [
+          "text",
+          "image"
+        ],
+        "output_modalities": [
+          "text"
+        ]
+      },
+      "supported_parameters": [
+        "temperature",
+        "top_p",
+        "max_tokens",
+        "tools",
+        "tool_choice",
+        "stop"
+      ],
+      "endpoints": [
+        {
+          "provider": "meta",
+          "region": "us",
+          "upstream_id": "muse-spark-1.2-contributor",
+          "pricing": {
+            "prompt": "0.0000001",
+            "completion": "0.0000002"
+          }
+        }
+      ]
+    },
+    {
+      "id": "mistral/magistral-medium-latest",
+      "name": "Mistral: Magistral Medium",
+      "context_length": 128000,
+      "pricing": {
+        "prompt": "0.000002",
+        "completion": "0.000005"
+      },
+      "architecture": {
+        "modality": "text->text",
+        "input_modalities": [
+          "text"
+        ],
+        "output_modalities": [
+          "text"
+        ]
+      },
+      "supported_parameters": [
+        "temperature",
+        "top_p",
+        "max_tokens",
+        "tools",
+        "stop"
+      ],
+      "endpoints": [
+        {
+          "provider": "mistral",
+          "region": "us",
+          "upstream_id": "magistral-medium-latest",
+          "pricing": {
+            "prompt": "0.000002",
+            "completion": "0.000005"
+          }
+        }
+      ]
+    },
+    {
+      "id": "mistral/mistral-large-latest",
+      "name": "Mistral: Large",
+      "context_length": 262144,
+      "pricing": {
+        "prompt": "0.0000005",
+        "completion": "0.0000015"
+      },
+      "architecture": {
+        "modality": "text+image->text",
+        "input_modalities": [
+          "text",
+          "image"
+        ],
+        "output_modalities": [
+          "text"
+        ]
+      },
+      "supported_parameters": [
+        "temperature",
+        "top_p",
+        "max_tokens",
+        "tools",
+        "stop"
+      ],
+      "endpoints": [
+        {
+          "provider": "mistral",
+          "region": "us",
+          "upstream_id": "mistral-large-latest",
+          "pricing": {
+            "prompt": "0.0000005",
+            "completion": "0.0000015"
+          }
+        }
+      ]
+    },
+    {
+      "id": "moonshot/kimi-k2.6",
+      "name": "Moonshot: Kimi K2.6",
+      "context_length": 256000,
+      "architecture": {
+        "modality": "text+image->text",
+        "input_modalities": [
+          "text",
+          "image"
+        ],
+        "output_modalities": [
+          "text"
+        ]
+      },
+      "supported_parameters": [
+        "temperature",
+        "top_p",
+        "max_tokens",
+        "tools",
+        "stop"
+      ],
+      "endpoints": [
+        {
+          "provider": "fireworks",
+          "region": "us",
+          "upstream_id": "accounts/fireworks/models/kimi-k2p6",
+          "pricing": {
+            "prompt": "0.0000006",
+            "completion": "0.0000025"
+          }
+        },
+        {
+          "provider": "baseten",
+          "region": "us",
+          "upstream_id": "moonshotai/Kimi-K2.6",
+          "pricing": {
+            "prompt": "0.0000006",
+            "completion": "0.0000025"
+          }
+        },
+        {
+          "provider": "moonshot",
+          "region": "cn",
+          "upstream_id": "kimi-k2.6",
+          "pricing": {
+            "prompt": "0.0000006",
+            "completion": "0.0000025"
+          }
+        }
+      ]
+    },
+    {
+      "id": "moonshot/kimi-k2.7-code",
+      "name": "Moonshot: Kimi K2.7 Code",
+      "context_length": 256000,
+      "architecture": {
+        "modality": "text->text",
+        "input_modalities": [
+          "text"
+        ],
+        "output_modalities": [
+          "text"
+        ]
+      },
+      "supported_parameters": [
+        "temperature",
+        "top_p",
+        "max_tokens",
+        "tools",
+        "stop"
+      ],
+      "endpoints": [
+        {
+          "provider": "fireworks",
+          "region": "us",
+          "upstream_id": "accounts/fireworks/models/kimi-k2p7-code",
+          "pricing": {
+            "prompt": "0.0000006",
+            "completion": "0.0000025"
+          }
+        },
+        {
+          "provider": "baseten",
+          "region": "us",
+          "upstream_id": "moonshotai/Kimi-K2.7-Code",
+          "pricing": {
+            "prompt": "0.0000006",
+            "completion": "0.0000025"
+          }
+        },
+        {
+          "provider": "moonshot",
+          "region": "cn",
+          "upstream_id": "kimi-k2.7-code",
+          "pricing": {
+            "prompt": "0.0000006",
+            "completion": "0.0000025"
+          }
+        }
+      ]
+    },
+    {
+      "id": "moonshot/kimi-k3",
+      "name": "Moonshot: Kimi K3",
+      "context_length": 1000000,
+      "architecture": {
+        "modality": "text+image->text",
+        "input_modalities": [
+          "text",
+          "image"
+        ],
+        "output_modalities": [
+          "text"
+        ]
+      },
+      "supported_parameters": [
+        "temperature",
+        "top_p",
+        "max_tokens",
+        "tools",
+        "stop"
+      ],
+      "endpoints": [
+        {
+          "provider": "fireworks",
+          "region": "us",
+          "upstream_id": "accounts/fireworks/models/kimi-k3",
+          "pricing": {
+            "prompt": "0.0000006",
+            "completion": "0.0000025"
+          }
+        },
+        {
+          "provider": "baseten",
+          "region": "us",
+          "upstream_id": "moonshotai/Kimi-K3",
+          "pricing": {
+            "prompt": "0.0000008",
+            "completion": "0.000003"
+          }
+        },
+        {
+          "provider": "moonshot",
+          "region": "cn",
+          "upstream_id": "kimi-k3",
+          "pricing": {
+            "prompt": "0.000003",
+            "completion": "0.000015"
+          }
+        }
+      ]
+    },
+    {
+      "id": "openai/gpt-5.6",
+      "name": "OpenAI: GPT-5.6",
+      "context_length": 1050000,
+      "pricing": {
+        "prompt": "0.000005",
+        "completion": "0.00003"
+      },
+      "architecture": {
+        "modality": "text+image->text",
+        "input_modalities": [
+          "text",
+          "image"
+        ],
+        "output_modalities": [
+          "text"
+        ]
+      },
+      "supported_parameters": [
+        "temperature",
+        "top_p",
+        "max_tokens",
+        "tools",
+        "tool_choice",
+        "response_format",
+        "seed",
+        "stop"
+      ],
+      "endpoints": [
+        {
+          "provider": "openai",
+          "region": "us",
+          "upstream_id": "gpt-5.6",
+          "pricing": {
+            "prompt": "0.000005",
+            "completion": "0.00003"
+          }
+        }
+      ]
+    },
+    {
+      "id": "openai/gpt-5.6-luna",
+      "name": "OpenAI: GPT-5.6 Luna",
+      "context_length": 1050000,
+      "pricing": {
+        "prompt": "0.0000002",
+        "completion": "0.0000012"
+      },
+      "architecture": {
+        "modality": "text+image->text",
+        "input_modalities": [
+          "text",
+          "image"
+        ],
+        "output_modalities": [
+          "text"
+        ]
+      },
+      "supported_parameters": [
+        "temperature",
+        "top_p",
+        "max_tokens",
+        "tools",
+        "tool_choice",
+        "response_format",
+        "seed",
+        "stop"
+      ],
+      "endpoints": [
+        {
+          "provider": "openai",
+          "region": "us",
+          "upstream_id": "gpt-5.6-luna",
+          "pricing": {
+            "prompt": "0.0000002",
+            "completion": "0.0000012"
+          }
+        }
+      ]
+    },
+    {
+      "id": "openai/gpt-5.6-sol",
+      "name": "OpenAI: GPT-5.6 Sol",
+      "context_length": 1050000,
+      "pricing": {
+        "prompt": "0.0000025",
+        "completion": "0.000015"
+      },
+      "architecture": {
+        "modality": "text+image->text",
+        "input_modalities": [
+          "text",
+          "image"
+        ],
+        "output_modalities": [
+          "text"
+        ]
+      },
+      "supported_parameters": [
+        "temperature",
+        "top_p",
+        "max_tokens",
+        "tools",
+        "tool_choice",
+        "response_format",
+        "seed",
+        "stop"
+      ],
+      "endpoints": [
+        {
+          "provider": "openai",
+          "region": "us",
+          "upstream_id": "gpt-5.6-sol",
+          "pricing": {
+            "prompt": "0.0000025",
+            "completion": "0.000015"
+          }
+        }
+      ]
+    },
+    {
+      "id": "openai/gpt-5.6-terra",
+      "name": "OpenAI: GPT-5.6 Terra",
+      "context_length": 1050000,
+      "pricing": {
+        "prompt": "0.000002",
+        "completion": "0.000012"
+      },
+      "architecture": {
+        "modality": "text+image->text",
+        "input_modalities": [
+          "text",
+          "image"
+        ],
+        "output_modalities": [
+          "text"
+        ]
+      },
+      "supported_parameters": [
+        "temperature",
+        "top_p",
+        "max_tokens",
+        "tools",
+        "tool_choice",
+        "response_format",
+        "seed",
+        "stop"
+      ],
+      "endpoints": [
+        {
+          "provider": "openai",
+          "region": "us",
+          "upstream_id": "gpt-5.6-terra",
+          "pricing": {
+            "prompt": "0.000002",
+            "completion": "0.000012"
+          }
+        }
+      ]
+    },
+    {
+      "id": "qwen/qwen3.7-plus",
+      "name": "Qwen: 3.7 Plus",
+      "context_length": 262144,
+      "architecture": {
+        "modality": "text+image->text",
+        "input_modalities": [
+          "text",
+          "image"
+        ],
+        "output_modalities": [
+          "text"
+        ]
+      },
+      "supported_parameters": [
+        "temperature",
+        "top_p",
+        "max_tokens",
+        "tools",
+        "stop"
+      ],
+      "endpoints": [
+        {
+          "provider": "fireworks",
+          "region": "us",
+          "upstream_id": "accounts/fireworks/models/qwen3p7-plus",
+          "pricing": {
+            "prompt": "0.0000004",
+            "completion": "0.0000016"
+          }
+        },
+        {
+          "provider": "qwen",
+          "region": "cn",
+          "upstream_id": "qwen-plus",
+          "pricing": {
+            "prompt": "0.0000008",
+            "completion": "0.000002"
+          }
+        }
+      ],
+      "pricing": {
+        "prompt": "0.00000032",
+        "completion": "0.00000128"
+      }
+    },
+    {
+      "id": "xai/grok-4.3",
+      "name": "xAI: Grok 4.3",
+      "context_length": 1000000,
+      "pricing": {
+        "prompt": "0.00000125",
+        "completion": "0.0000025"
+      },
+      "architecture": {
+        "modality": "text+image->text",
+        "input_modalities": [
+          "text",
+          "image"
+        ],
+        "output_modalities": [
+          "text"
+        ]
+      },
+      "supported_parameters": [
+        "temperature",
+        "top_p",
+        "max_tokens",
+        "tools",
+        "stop"
+      ],
+      "endpoints": [
+        {
+          "provider": "xai",
+          "region": "us",
+          "upstream_id": "grok-4.3",
+          "pricing": {
+            "prompt": "0.00000125",
+            "completion": "0.0000025"
+          }
+        }
+      ]
+    },
+    {
+      "id": "xai/grok-4.6",
+      "name": "xAI: Grok 4.6",
+      "context_length": 500000,
+      "pricing": {
+        "prompt": "0.000002",
+        "completion": "0.000006"
+      },
+      "architecture": {
+        "modality": "text+image->text",
+        "input_modalities": [
+          "text",
+          "image"
+        ],
+        "output_modalities": [
+          "text"
+        ]
+      },
+      "supported_parameters": [
+        "temperature",
+        "top_p",
+        "max_tokens",
+        "tools",
+        "stop"
+      ],
+      "endpoints": [
+        {
+          "provider": "xai",
+          "region": "us",
+          "upstream_id": "grok-4.6",
+          "pricing": {
+            "prompt": "0.000002",
+            "completion": "0.000006"
+          }
+        }
+      ]
+    },
+    {
+      "id": "zhipu/glm-5.2",
+      "name": "Zhipu: GLM-5.2",
+      "context_length": 1000000,
+      "architecture": {
+        "modality": "text->text",
+        "input_modalities": [
+          "text"
+        ],
+        "output_modalities": [
+          "text"
+        ]
+      },
+      "supported_parameters": [
+        "temperature",
+        "top_p",
+        "max_tokens",
+        "tools",
+        "stop"
+      ],
+      "endpoints": [
+        {
+          "provider": "fireworks",
+          "region": "us",
+          "upstream_id": "accounts/fireworks/models/glm-5p2",
+          "pricing": {
+            "prompt": "0.0000014",
+            "completion": "0.0000044"
+          }
+        },
+        {
+          "provider": "baseten",
+          "region": "us",
+          "upstream_id": "zai-org/GLM-5.2",
+          "pricing": {
+            "prompt": "0.0000014",
+            "completion": "0.0000044"
+          }
+        },
+        {
+          "provider": "zhipu",
+          "region": "cn",
+          "upstream_id": "glm-5.2",
+          "pricing": {
+            "prompt": "0.0000014",
+            "completion": "0.0000044"
+          }
+        }
       ]
     }
   ]
