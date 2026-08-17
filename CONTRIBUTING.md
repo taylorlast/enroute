@@ -50,21 +50,44 @@ Run it yourself with:
 uv run python -m enroute.catalog.sync --check   # report drift, exit 1 if stale
 uv run python -m enroute.catalog.sync --write   # apply price changes
 uv run python -m enroute.catalog.sync --write --add openai/gpt-5.6-luna
+uv run python -m enroute.catalog.sync --write --add-host azure
 ```
 
-Three rules keep the file trustworthy:
+Four rules keep the file trustworthy:
 
 - **Prices are applied automatically.** A stale rate misbills every request, so
   drift is the one thing the job fixes on its own.
+- **Prices are list prices, never promotional ones.** OpenRouter's `/models` list
+  reports what a caller pays after a discount and omits the discount field, so the
+  sync reads `/endpoints` and divides the discount back out. Recording a promo
+  would undercharge the moment it expires, and the gap is ours.
 - **Additions are deliberate.** The catalog is curated, not a mirror. New models
   are listed in the report as candidates; `--add` brings one in.
 - **Removals never happen automatically.** Dropping a model breaks callers, so
   the job reports and leaves it.
 
 A model with no price is left unpriced. Downstream gateways treat an unpriced
-model as unavailable, so it stays hidden until someone fills the rate in. If a
-model needs per-host rates, set them on its `endpoints` entries; the sync moves a
-host rate only when it was tracking the default.
+model as unavailable, so it stays hidden until someone fills the rate in.
+
+Each `endpoints` entry carries its own rate, because the same model costs
+different amounts on different clouds and in different regions. The model-level
+price tracks the first endpoint, which is the host routing prefers, so it
+advertises what we will actually pay rather than the cheapest listing anywhere.
+`--add-host <provider>` pulls a cloud's regional endpoints in for every model that
+offers them. An endpoint whose provider has no configured key reports unavailable
+and is skipped during routing, so listing a cloud before holding credentials for
+it is safe.
+
+Two kinds of upstream endpoint are deliberately excluded from pricing:
+
+- **Service tiers** such as `flex` and `priority` are separate products with their
+  own rates and latency characteristics, so one flat number cannot represent both.
+- **Quantized deployments** such as `fp8` and `fp4` are cheaper because they are
+  smaller, and pricing the full-precision model from them would misrepresent it.
+
+The sync also reports models whose upstream pricing changes above a prompt-token
+threshold. This schema stores one flat rate, so those requests bill low and the
+difference is absorbed. Fixing it properly needs tiered pricing in the schema.
 
 ## Release
 
