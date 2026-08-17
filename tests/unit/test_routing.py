@@ -1,4 +1,7 @@
+import pytest
+
 from enroute.catalog import ModelCatalog
+from enroute.errors import ConfigurationError
 from enroute.routing import Explicit, LeastCost, LowestLatency
 from enroute.routing.router import Router
 from enroute.types import ChatRequest, ChatResponse, Choice, Message, ProviderPreferences, Usage
@@ -98,6 +101,31 @@ def test_multi_host_lab_opt_in() -> None:
     routes = Explicit().select(req, ["moonshot/kimi-k3"], catalog)
     assert [r.provider for r in routes] == ["moonshot"]
     assert routes[0].upstream_id == "kimi-k3"
+
+
+def test_routes_skip_hosts_we_have_no_key_for() -> None:
+    # The catalog lists clouds like Azure and Bedrock for flagship models. A
+    # deployment without those credentials must still reach the hosts it has.
+    catalog = ModelCatalog()
+    spec = catalog.require("moonshot/kimi-k3")
+    hosts = [endpoint.provider for endpoint in spec.ordered_endpoints()]
+    assert "moonshot" in hosts and "fireworks" in hosts
+
+    router = Router({"moonshot": _StubProvider()}, catalog=catalog)
+    req = ChatRequest(model="moonshot/kimi-k3", messages=[Message(role="user", content="hi")])
+    routes = router._routes(req)
+
+    assert [route.provider for route in routes] == ["moonshot"]
+    assert router.chat(req)[0].text == "ok"
+
+
+def test_unroutable_model_names_the_hosts_it_needs() -> None:
+    catalog = ModelCatalog()
+    router = Router({"moonshot": _StubProvider()}, catalog=catalog)
+    req = ChatRequest(model="openai/gpt-5.6-sol", messages=[Message(role="user", content="hi")])
+    with pytest.raises(ConfigurationError) as excinfo:
+        router._routes(req)
+    assert "openai" in str(excinfo.value)
 
 
 def test_gateway_mode_routes_all_models_through_enroute() -> None:

@@ -204,6 +204,44 @@ def test_diff_reports_hosts_we_do_not_list() -> None:
     assert len(spec.get("endpoints", [])) <= 1
 
 
+def test_add_host_brings_in_regional_endpoints_with_their_own_rates() -> None:
+    endpoints = {
+        "openai/gpt-x": [
+            host(),
+            host("azure", region="us", prompt=5e-6, completion=3e-5, upstream_id="gpt-x-dep"),
+            host("azure", region="eu", prompt=5.5e-6, completion=3.3e-5),
+            host("bedrock", region="us", prompt=5.5e-6, completion=3.3e-5),
+        ]
+    }
+    changes = diff_catalog(CURRENT, UPSTREAM, set(), endpoints_by_model=endpoints)
+    updated = apply_diff(
+        CURRENT,
+        UPSTREAM,
+        changes,
+        add_hosts=["azure"],
+        endpoints_by_model=endpoints,
+    )
+    spec = next(m for m in updated["models"] if m["id"] == "openai/gpt-x")
+    hosts = [(e["provider"], e["region"]) for e in spec["endpoints"]]
+
+    # Added in a deterministic order; ordered_endpoints() still prefers US at read time.
+    assert hosts == [("openai", "us"), ("azure", "eu"), ("azure", "us")]
+    # Each region keeps its own rate; EU is more expensive than US.
+    azure_eu = next(e for e in spec["endpoints"] if e["region"] == "eu")
+    assert azure_eu["pricing"]["prompt"] == "0.0000055"
+    assert next(e for e in spec["endpoints"] if e["provider"] == "azure")["upstream_id"]
+
+
+def test_add_host_is_idempotent() -> None:
+    endpoints = {"openai/gpt-x": [host(), host("azure", region="eu")]}
+    changes = diff_catalog(CURRENT, UPSTREAM, set(), endpoints_by_model=endpoints)
+    once = apply_diff(CURRENT, UPSTREAM, changes, add_hosts=["azure"], endpoints_by_model=endpoints)
+    twice = apply_diff(once, UPSTREAM, changes, add_hosts=["azure"], endpoints_by_model=endpoints)
+    first = next(m for m in once["models"] if m["id"] == "openai/gpt-x")["endpoints"]
+    second = next(m for m in twice["models"] if m["id"] == "openai/gpt-x")["endpoints"]
+    assert len(first) == len(second) == 2
+
+
 def test_diff_says_nothing_when_the_endpoint_lookup_fails() -> None:
     # A failed HTTP call must not read as "upstream dropped every price".
     changes = diff_catalog(CURRENT, UPSTREAM, set(), endpoints_by_model={})

@@ -1,5 +1,5 @@
 {
-  "updated_at": "2026-08-17T00:00:00Z",
+  "updated_at": "2026-08-17T21:56:08Z",
   "models": [
     {
       "id": "anthropic/claude-fable-5",
@@ -32,6 +32,42 @@
           "provider": "anthropic",
           "region": "us",
           "upstream_id": "claude-fable-5",
+          "pricing": {
+            "prompt": "0.00001",
+            "completion": "0.00005"
+          }
+        },
+        {
+          "provider": "azure",
+          "region": "us",
+          "upstream_id": "claude-5-fable-20260609",
+          "pricing": {
+            "prompt": "0.00001",
+            "completion": "0.00005"
+          }
+        },
+        {
+          "provider": "bedrock",
+          "region": "us",
+          "upstream_id": "claude-5-fable-20260609",
+          "pricing": {
+            "prompt": "0.00001",
+            "completion": "0.00005"
+          }
+        },
+        {
+          "provider": "vertex",
+          "region": "eu",
+          "upstream_id": "claude-5-fable-20260609",
+          "pricing": {
+            "prompt": "0.000011",
+            "completion": "0.000055"
+          }
+        },
+        {
+          "provider": "vertex",
+          "region": "global",
+          "upstream_id": "claude-5-fable-20260609",
           "pricing": {
             "prompt": "0.00001",
             "completion": "0.00005"
@@ -74,6 +110,69 @@
             "prompt": "0.000001",
             "completion": "0.000005"
           }
+        },
+        {
+          "provider": "azure",
+          "region": "global",
+          "upstream_id": "claude-4.5-haiku-20251001",
+          "pricing": {
+            "prompt": "0.000001",
+            "completion": "0.000005"
+          }
+        },
+        {
+          "provider": "bedrock",
+          "region": "eu",
+          "upstream_id": "claude-4.5-haiku-20251001",
+          "pricing": {
+            "prompt": "0.0000011",
+            "completion": "0.0000055"
+          }
+        },
+        {
+          "provider": "bedrock",
+          "region": "global",
+          "upstream_id": "claude-4.5-haiku-20251001",
+          "pricing": {
+            "prompt": "0.000001",
+            "completion": "0.000005"
+          }
+        },
+        {
+          "provider": "bedrock",
+          "region": "us",
+          "upstream_id": "claude-4.5-haiku-20251001",
+          "pricing": {
+            "prompt": "0.0000011",
+            "completion": "0.0000055"
+          }
+        },
+        {
+          "provider": "vertex",
+          "region": "eu",
+          "upstream_id": "claude-4.5-haiku-20251001",
+          "pricing": {
+            "prompt": "0.0000011",
+            "completion": "0.0000055"
+          }
+        },
+        {
+          "provider": "vertex",
+          "region": "global",
+          "upstream_id": "claude-4.5-haiku-20251001",
+          "pricing": {
+            "prompt": "0.000001",
+            "completion": "0.000005"
+          }
+        },
+        {
+          "provider": "vertex",
+          "region": "us",
+          "upstream_id": "claude-4.5-haiku-20251001",
+          "pricing": {
+            "prompt": "0.0000011",
+            "completion": "0.0000055"
+          }
         }
       ]
     },
@@ -112,6 +211,60 @@
             "prompt": "0.000005",
             "completion": "0.000025"
           }
+        },
+        {
+          "provider": "azure",
+          "region": "global",
+          "upstream_id": "claude-opus-5-20260723",
+          "pricing": {
+            "prompt": "0.000005",
+            "completion": "0.000025"
+          }
+        },
+        {
+          "provider": "azure",
+          "region": "us",
+          "upstream_id": "claude-opus-5-20260723",
+          "pricing": {
+            "prompt": "0.000005",
+            "completion": "0.000025"
+          }
+        },
+        {
+          "provider": "bedrock",
+          "region": "us",
+          "upstream_id": "claude-opus-5-20260723",
+          "pricing": {
+            "prompt": "0.000005",
+            "completion": "0.000025"
+          }
+        },
+        {
+          "provider": "vertex",
+          "region": "eu",
+          "upstream_id": "claude-opus-5-20260723",
+          "pricing": {
+            "prompt": "0.0000055",
+            "completion": "0.0000275"
+          }
+        },
+        {
+          "provider": "vertex",
+          "region": "global",
+          "upstream_id": "claude-opus-5-20260723",
+          "pricing": {
+            "prompt": "0.000005",
+            "completion": "0.000025"
+          }
+        },
+        {
+          "provider": "vertex",
+          "region": "us",
+          "upstream_id": "claude-opus-5-20260723",
+          "pricing": {
+            "prompt": "0.0000055",
+            "completion": "0.0000275"
+          }
         }
       ]
     },
@@ -149,6 +302,69 @@
           "pricing": {
             "prompt": "0.000002",
             "completion": "0.00001"
+          }
+        },
+        {
+          "provider": "azure",
+          "region": "global",
+          "upstream_id": "claude-sonnet-5-20260630",
+          "pricing": {
+            "prompt": "0.000002",
+            "completion": "0.00001"
+          }
+        },
+        {
+          "provider": "azure",
+          "region": "us",
+          "upstream_id": "claude-sonnet-5-20260630",
+          "pricing": {
+            "prompt": "0.000002",
+            "completion": "0.00001"
+          }
+        },
+        {
+          "provider": "bedrock",
+          "region": "global",
+          "upstream_id": "claude-sonnet-5-20260630",
+          "pricing": {
+            "prompt": "0.000002",
+            "completion": "0.00001"
+          }
+        },
+        {
+          "provider": "bedrock",
+          "region": "us",
+          "upstream_id": "claude-sonnet-5-20260630",
+          "pricing": {
+            "prompt": "0.0000022",
+            "completion": "0.000011"
+          }
+        },
+        {
+          "provider": "vertex",
+          "region": "eu",
+          "upstream_id": "claude-sonnet-5-20260630",
+          "pricing": {
+            "prompt": "0.0000022",
+            "completion": "0.000011"
+          }
+        },
+        {
+          "provider": "vertex",
+          "region": "global",
+          "upstream_id": "claude-sonnet-5-20260630",
+          "pricing": {
+            "prompt": "0.000002",
+            "completion": "0.00001"
+          }
+        },
+        {
+          "provider": "vertex",
+          "region": "us",
+          "upstream_id": "claude-sonnet-5-20260630",
+          "pricing": {
+            "prompt": "0.0000022",
+            "completion": "0.000011"
           }
         }
       ]
@@ -200,6 +416,15 @@
             "prompt": "0.00000014",
             "completion": "0.00000028"
           }
+        },
+        {
+          "provider": "azure",
+          "region": "us",
+          "upstream_id": "deepseek-v4-flash-20260423",
+          "pricing": {
+            "prompt": "0.00000021",
+            "completion": "0.00000056"
+          }
         }
       ]
     },
@@ -207,6 +432,10 @@
       "id": "deepseek/deepseek-v4-pro",
       "name": "DeepSeek: V4 Pro",
       "context_length": 1000000,
+      "pricing": {
+        "prompt": "0.00000174",
+        "completion": "0.00000348"
+      },
       "architecture": {
         "modality": "text->text",
         "input_modalities": [
@@ -249,6 +478,15 @@
           "pricing": {
             "prompt": "0.000000435",
             "completion": "0.00000087"
+          }
+        },
+        {
+          "provider": "azure",
+          "region": "us",
+          "upstream_id": "deepseek-v4-pro-20260423",
+          "pricing": {
+            "prompt": "0.00000191",
+            "completion": "0.00000383"
           }
         }
       ]
@@ -320,6 +558,15 @@
           "provider": "google",
           "region": "us",
           "upstream_id": "gemini-3.7-flash",
+          "pricing": {
+            "prompt": "0.00000075",
+            "completion": "0.00000375"
+          }
+        },
+        {
+          "provider": "vertex",
+          "region": "global",
+          "upstream_id": "gemini-3.7-flash-20260813",
           "pricing": {
             "prompt": "0.00000075",
             "completion": "0.00000375"
@@ -665,6 +912,33 @@
             "prompt": "0.000005",
             "completion": "0.00003"
           }
+        },
+        {
+          "provider": "azure",
+          "region": "eu",
+          "upstream_id": "gpt-5.6-sol-20260709",
+          "pricing": {
+            "prompt": "0.0000055",
+            "completion": "0.000033"
+          }
+        },
+        {
+          "provider": "azure",
+          "region": "us",
+          "upstream_id": "gpt-5.6-sol-20260709",
+          "pricing": {
+            "prompt": "0.000005",
+            "completion": "0.00003"
+          }
+        },
+        {
+          "provider": "bedrock",
+          "region": "us",
+          "upstream_id": "gpt-5.6-sol-20260709",
+          "pricing": {
+            "prompt": "0.0000055",
+            "completion": "0.000033"
+          }
         }
       ]
     },
@@ -704,6 +978,33 @@
           "pricing": {
             "prompt": "0.0000002",
             "completion": "0.0000012"
+          }
+        },
+        {
+          "provider": "azure",
+          "region": "eu",
+          "upstream_id": "gpt-5.6-luna-20260709",
+          "pricing": {
+            "prompt": "0.00000022",
+            "completion": "0.00000132"
+          }
+        },
+        {
+          "provider": "azure",
+          "region": "us",
+          "upstream_id": "gpt-5.6-luna-20260709",
+          "pricing": {
+            "prompt": "0.0000002",
+            "completion": "0.0000012"
+          }
+        },
+        {
+          "provider": "bedrock",
+          "region": "us",
+          "upstream_id": "gpt-5.6-luna-20260709",
+          "pricing": {
+            "prompt": "0.00000022",
+            "completion": "0.00000132"
           }
         }
       ]
@@ -745,6 +1046,33 @@
             "prompt": "0.000005",
             "completion": "0.00003"
           }
+        },
+        {
+          "provider": "azure",
+          "region": "eu",
+          "upstream_id": "gpt-5.6-sol-20260709",
+          "pricing": {
+            "prompt": "0.0000055",
+            "completion": "0.000033"
+          }
+        },
+        {
+          "provider": "azure",
+          "region": "us",
+          "upstream_id": "gpt-5.6-sol-20260709",
+          "pricing": {
+            "prompt": "0.000005",
+            "completion": "0.00003"
+          }
+        },
+        {
+          "provider": "bedrock",
+          "region": "us",
+          "upstream_id": "gpt-5.6-sol-20260709",
+          "pricing": {
+            "prompt": "0.0000055",
+            "completion": "0.000033"
+          }
         }
       ]
     },
@@ -785,6 +1113,33 @@
             "prompt": "0.000002",
             "completion": "0.000012"
           }
+        },
+        {
+          "provider": "azure",
+          "region": "eu",
+          "upstream_id": "gpt-5.6-terra-20260709",
+          "pricing": {
+            "prompt": "0.0000022",
+            "completion": "0.0000132"
+          }
+        },
+        {
+          "provider": "azure",
+          "region": "us",
+          "upstream_id": "gpt-5.6-terra-20260709",
+          "pricing": {
+            "prompt": "0.000002",
+            "completion": "0.000012"
+          }
+        },
+        {
+          "provider": "bedrock",
+          "region": "us",
+          "upstream_id": "gpt-5.6-terra-20260709",
+          "pricing": {
+            "prompt": "0.0000022",
+            "completion": "0.0000132"
+          }
         }
       ]
     },
@@ -792,6 +1147,10 @@
       "id": "qwen/qwen3.7-plus",
       "name": "Qwen: 3.7 Plus",
       "context_length": 262144,
+      "pricing": {
+        "prompt": "0.00000032",
+        "completion": "0.00000128"
+      },
       "architecture": {
         "modality": "text+image->text",
         "input_modalities": [

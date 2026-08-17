@@ -110,7 +110,7 @@ class Router:
             raise ConfigurationError("no routes available for request", model=request.model)
         # Hosted gateway mode: one ``enroute`` provider serves every author/slug.
         if "enroute" in self.providers:
-            routes = [
+            return [
                 ModelRoute(
                     model=route.model,
                     provider="enroute",
@@ -119,7 +119,17 @@ class Router:
                 )
                 for route in routes
             ]
-        return routes
+        # The catalog lists every host a model has, including clouds this caller
+        # holds no credentials for. Those are not routes, so drop them here rather
+        # than failing mid-attempt and abandoning the hosts we can reach.
+        routable = [route for route in routes if route.provider in self.providers]
+        if not routable:
+            offered = sorted({route.provider for route in routes})
+            raise ConfigurationError(
+                f"no configured provider can serve this model; it is hosted by {offered}",
+                model=request.model,
+            )
+        return routable
 
     def _route_request(
         self, request: ChatRequest, route: ModelRoute, *, stream: bool

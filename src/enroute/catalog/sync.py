@@ -815,6 +815,8 @@ def apply_diff(
     changes: CatalogDiff,
     *,
     add: Iterable[str] = (),
+    add_hosts: Iterable[str] = (),
+    endpoints_by_model: Mapping[str, list[UpstreamEndpoint]] | None = None,
     now: datetime | None = None,
 ) -> dict[str, Any]:
     """Produce an updated catalog document.
@@ -828,6 +830,9 @@ def apply_diff(
         upstream: Upstream models keyed by id.
         changes: Differences from :func:`diff_catalog`.
         add: Model ids to bring into the catalog.
+        add_hosts: Provider slugs whose regional endpoints should be added to
+            every carried model that upstream offers them for.
+        endpoints_by_model: Per-model host records, required by ``add_hosts``.
         now: Timestamp to stamp the document with.
 
     Returns:
@@ -865,6 +870,30 @@ def apply_diff(
         model = upstream.get(model_id)
         if model is not None:
             entries[model.id] = _spec_from_upstream(model)
+
+    for provider in add_hosts:
+        for model_id, hosts in (endpoints_by_model or {}).items():
+            spec = entries.get(model_id)
+            if spec is None:
+                continue
+            existing = {_endpoint_key(e) for e in spec.get("endpoints") or []}
+            added = list(spec.get("endpoints") or [])
+            for key, endpoint in sorted(standard_endpoints(hosts).items()):
+                if key[0] != provider or key in existing:
+                    continue
+                added.append(
+                    {
+                        "provider": endpoint.provider,
+                        "region": endpoint.region,
+                        "upstream_id": endpoint.upstream_id,
+                        "pricing": {
+                            "prompt": f"{endpoint.prompt:.10f}".rstrip("0"),
+                            "completion": f"{endpoint.completion:.10f}".rstrip("0"),
+                        },
+                    }
+                )
+            if added:
+                spec["endpoints"] = added
 
     return {
         "updated_at": stamped.strftime("%Y-%m-%dT%H:%M:%SZ"),
@@ -1004,6 +1033,13 @@ def main(argv: list[str] | None = None) -> int:
         metavar="MODEL_ID",
         help="Bring a model into the catalog. Repeatable.",
     )
+    parser.add_argument(
+        "--add-host",
+        action="append",
+        default=[],
+        metavar="PROVIDER",
+        help="Add a provider's regional endpoints to every model that offers them.",
+    )
     parser.add_argument("--path", type=Path, default=DATA_PATH)
     args = parser.parse_args(argv)
 
@@ -1032,8 +1068,18 @@ def main(argv: list[str] | None = None) -> int:
     if unknown:
         parser.error(f"unknown model ids: {', '.join(unknown)}")
 
-    if args.write and (changes.has_updates or args.add):
-        write_catalog(apply_diff(current, upstream, changes, add=args.add), args.path)
+    if args.write and (changes.has_updates or args.add or args.add_host):
+        write_catalog(
+            apply_diff(
+                current,
+                upstream,
+                changes,
+                add=args.add,
+                add_hosts=args.add_host,
+                endpoints_by_model=endpoints_by_model,
+            ),
+            args.path,
+        )
 
     return 1 if args.check and changes.has_updates else 0
 
