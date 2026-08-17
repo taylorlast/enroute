@@ -4,7 +4,7 @@ Examples:
     >>> from enroute.catalog.models import ModelCatalog, estimate_cost
     >>> from enroute.types import Usage
     >>> cat = ModelCatalog()
-    >>> spec = cat.get("openai/gpt-4o-mini")
+    >>> spec = cat.get("openai/gpt-5.6-luna")
     >>> spec is not None
     True
     >>> estimate_cost(Usage.from_counts(1000, 500), spec) > 0
@@ -22,6 +22,8 @@ from pydantic import BaseModel, Field
 
 from enroute.errors import NotFoundError
 from enroute.types import Usage
+
+_US_HOST_ORDER = ("fireworks", "baseten")
 
 
 class ModelPricing(BaseModel):
@@ -50,6 +52,22 @@ class Architecture(BaseModel):
     output_modalities: list[str] = Field(default_factory=lambda: ["text"])
 
 
+class ModelEndpoint(BaseModel):
+    """A concrete inference host for a catalog model.
+
+    Attributes:
+        provider: Host slug (``openai``, ``fireworks``, ``moonshot``, …).
+        region: Serving region hint (``us``, ``cn``, ``global``).
+        upstream_id: Model id the host expects.
+        pricing: Pass-through price at this host.
+    """
+
+    provider: str
+    region: str = "us"
+    upstream_id: str
+    pricing: ModelPricing | None = None
+
+
 class ModelSpec(BaseModel):
     """A catalog entry for a model.
 
@@ -57,9 +75,10 @@ class ModelSpec(BaseModel):
         id: Model id in ``author/slug`` form.
         name: Human-readable display name.
         context_length: Maximum context window in tokens.
-        pricing: Per-token pricing.
+        pricing: Default per-token pricing (US-first host, then first endpoint).
         architecture: Modality metadata.
         supported_parameters: Request parameters the model accepts.
+        endpoints: Inference hosts. Empty means the author is the only host.
         provider: Derived provider slug (author segment of ``id``).
     """
 
@@ -69,10 +88,11 @@ class ModelSpec(BaseModel):
     pricing: ModelPricing | None = None
     architecture: Architecture = Field(default_factory=Architecture)
     supported_parameters: list[str] = Field(default_factory=list)
+    endpoints: list[ModelEndpoint] = Field(default_factory=list)
 
     @property
     def provider(self) -> str:
-        """Provider slug derived from the model id.
+        """Author slug derived from the model id.
 
         Returns:
             The ``author`` segment of ``author/slug``, or the full id.
@@ -81,13 +101,68 @@ class ModelSpec(BaseModel):
             return self.id.split("/", 1)[0]
         return self.id
 
+    def ordered_endpoints(self) -> list[ModelEndpoint]:
+        """Return endpoints with US hosts first (Fireworks, then Baseten).
 
-def estimate_cost(usage: Usage, spec: ModelSpec | None) -> float | None:
+        Returns:
+            Ordered endpoints, or a single implicit author host when none are listed.
+        """
+        if not self.endpoints:
+            upstream = self.id.split("/", 1)[1] if "/" in self.id else self.id
+            return [
+                ModelEndpoint(
+                    provider=self.provider,
+                    region="us",
+                    upstream_id=upstream,
+                    pricing=self.pricing,
+                )
+            ]
+        us = [endpoint for endpoint in self.endpoints if endpoint.region == "us"]
+        rest = [endpoint for endpoint in self.endpoints if endpoint.region != "us"]
+
+        def us_key(endpoint: ModelEndpoint) -> int:
+            if endpoint.provider in _US_HOST_ORDER:
+                return _US_HOST_ORDER.index(endpoint.provider)
+            return 50
+
+        us.sort(key=us_key)
+        return us + rest
+
+    def host_providers(self) -> list[str]:
+        """Return host slugs that can serve this model."""
+        return [endpoint.provider for endpoint in self.ordered_endpoints()]
+
+    def pricing_for(self, provider: str | None = None) -> ModelPricing | None:
+        """Return pricing for a host, or the default US-first price.
+
+        Args:
+            provider: Host slug. ``None`` uses the default endpoint.
+
+        Returns:
+            Per-token pricing, or ``None``.
+        """
+        endpoints = self.ordered_endpoints()
+        if provider:
+            for endpoint in endpoints:
+                if endpoint.provider == provider and endpoint.pricing is not None:
+                    return endpoint.pricing
+        if endpoints and endpoints[0].pricing is not None:
+            return endpoints[0].pricing
+        return self.pricing
+
+
+def estimate_cost(
+    usage: Usage,
+    spec: ModelSpec | None,
+    *,
+    provider: str | None = None,
+) -> float | None:
     """Estimate USD cost for a usage record against a model spec.
 
     Args:
         usage: Token usage.
         spec: Model catalog entry, or ``None``.
+        provider: Optional host slug; bills at that host's pass-through price.
 
     Returns:
         Estimated USD cost, or ``None`` if pricing is unavailable.
@@ -95,18 +170,18 @@ def estimate_cost(usage: Usage, spec: ModelSpec | None) -> float | None:
     Examples:
         >>> from enroute.types import Usage
         >>> spec = ModelSpec(
-        ...     id="openai/gpt-4o-mini",
-        ...     pricing=ModelPricing(prompt=0.00000015, completion=0.0000006),
+        ...     id="openai/gpt-5.6-luna",
+        ...     pricing=ModelPricing(prompt=0.0000002, completion=0.0000012),
         ... )
         >>> round(estimate_cost(Usage.from_counts(1_000_000, 0), spec) or 0, 2)
-        0.15
+        0.2
     """
-    if spec is None or spec.pricing is None:
+    if spec is None:
         return None
-    return (
-        usage.prompt_tokens * spec.pricing.prompt
-        + usage.completion_tokens * spec.pricing.completion
-    )
+    pricing = spec.pricing_for(provider)
+    if pricing is None:
+        return None
+    return usage.prompt_tokens * pricing.prompt + usage.completion_tokens * pricing.completion
 
 
 def _parse_pricing(raw: dict[str, Any] | None) -> ModelPricing | None:
@@ -116,6 +191,19 @@ def _parse_pricing(raw: dict[str, Any] | None) -> ModelPricing | None:
         return ModelPricing(prompt=float(raw["prompt"]), completion=float(raw["completion"]))
     except (KeyError, TypeError, ValueError):
         return None
+
+
+def _parse_endpoint(raw: dict[str, Any]) -> ModelEndpoint | None:
+    provider = raw.get("provider")
+    upstream_id = raw.get("upstream_id")
+    if not provider or not upstream_id:
+        return None
+    return ModelEndpoint(
+        provider=str(provider),
+        region=str(raw.get("region") or "us"),
+        upstream_id=str(upstream_id),
+        pricing=_parse_pricing(raw.get("pricing")),
+    )
 
 
 class ModelCatalog:
@@ -162,20 +250,31 @@ class ModelCatalog:
         self._updated_at = payload.get("updated_at")
         models: dict[str, ModelSpec] = {}
         for item in payload.get("models") or []:
+            endpoints = [
+                endpoint
+                for raw in item.get("endpoints") or []
+                if (endpoint := _parse_endpoint(raw)) is not None
+            ]
             pricing = _parse_pricing(item.get("pricing"))
-            arch_raw = item.get("architecture") or {}
             spec = ModelSpec(
                 id=item["id"],
                 name=item.get("name"),
                 context_length=item.get("context_length"),
                 pricing=pricing,
                 architecture=Architecture(
-                    modality=arch_raw.get("modality"),
-                    input_modalities=list(arch_raw.get("input_modalities") or ["text"]),
-                    output_modalities=list(arch_raw.get("output_modalities") or ["text"]),
+                    modality=(item.get("architecture") or {}).get("modality"),
+                    input_modalities=list(
+                        (item.get("architecture") or {}).get("input_modalities") or ["text"]
+                    ),
+                    output_modalities=list(
+                        (item.get("architecture") or {}).get("output_modalities") or ["text"]
+                    ),
                 ),
                 supported_parameters=list(item.get("supported_parameters") or []),
+                endpoints=endpoints,
             )
+            if spec.pricing is None:
+                spec.pricing = spec.pricing_for()
             models[spec.id] = spec
         self._models = models
 
@@ -258,18 +357,37 @@ class ModelCatalog:
             "updated_at": self._updated_at,
             "models": [
                 {
-                    "id": m.id,
-                    "name": m.name,
-                    "context_length": m.context_length,
+                    "id": spec.id,
+                    "name": spec.name,
+                    "context_length": spec.context_length,
                     "pricing": (
-                        {"prompt": str(m.pricing.prompt), "completion": str(m.pricing.completion)}
-                        if m.pricing
+                        {
+                            "prompt": str(spec.pricing.prompt),
+                            "completion": str(spec.pricing.completion),
+                        }
+                        if spec.pricing
                         else None
                     ),
-                    "architecture": m.architecture.model_dump(),
-                    "supported_parameters": m.supported_parameters,
+                    "architecture": spec.architecture.model_dump(),
+                    "supported_parameters": spec.supported_parameters,
+                    "endpoints": [
+                        {
+                            "provider": endpoint.provider,
+                            "region": endpoint.region,
+                            "upstream_id": endpoint.upstream_id,
+                            "pricing": (
+                                {
+                                    "prompt": str(endpoint.pricing.prompt),
+                                    "completion": str(endpoint.pricing.completion),
+                                }
+                                if endpoint.pricing
+                                else None
+                            ),
+                        }
+                        for endpoint in spec.endpoints
+                    ],
                 }
-                for m in self.models()
+                for spec in self.models()
             ],
         }
         path.parent.mkdir(parents=True, exist_ok=True)

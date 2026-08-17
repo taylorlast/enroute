@@ -111,10 +111,22 @@ class Router:
         # Hosted gateway mode: one ``enroute`` provider serves every author/slug.
         if "enroute" in self.providers:
             routes = [
-                ModelRoute(model=route.model, provider="enroute", priority=route.priority)
+                ModelRoute(
+                    model=route.model,
+                    provider="enroute",
+                    upstream_id=route.model,
+                    priority=route.priority,
+                )
                 for route in routes
             ]
         return routes
+
+    def _route_request(
+        self, request: ChatRequest, route: ModelRoute, *, stream: bool
+    ) -> ChatRequest:
+        return request.model_copy(
+            update={"model": route.upstream_id or route.model, "stream": stream}
+        )
 
     def _get_provider(self, route: ModelRoute) -> Provider:
         provider = self.providers.get(route.provider)
@@ -135,9 +147,10 @@ class Router:
         max_price = prefs.max_price if prefs else None
         # Soft check using catalog pricing with a nominal token estimate.
         spec = self.catalog.get(route.model)
-        if spec is None or spec.pricing is None:
+        pricing = spec.pricing_for(route.provider) if spec is not None else None
+        if spec is None or pricing is None:
             return
-        estimated = estimate_cost(Usage.from_counts(1000, 500), spec)
+        estimated = estimate_cost(Usage.from_counts(1000, 500), spec, provider=route.provider)
         if estimated is not None and estimated > self.max_cost_usd:
             raise BudgetExceededError(
                 f"estimated cost {estimated:.6f} exceeds budget {self.max_cost_usd}",
@@ -147,13 +160,13 @@ class Router:
         if max_price:
             prompt_cap = max_price.get("prompt")
             completion_cap = max_price.get("completion")
-            if prompt_cap is not None and spec.pricing.prompt > prompt_cap:
+            if prompt_cap is not None and pricing.prompt > prompt_cap:
                 raise BudgetExceededError(
                     "prompt price exceeds max_price.prompt",
                     model=route.model,
                     provider=route.provider,
                 )
-            if completion_cap is not None and spec.pricing.completion > completion_cap:
+            if completion_cap is not None and pricing.completion > completion_cap:
                 raise BudgetExceededError(
                     "completion price exceeds max_price.completion",
                     model=route.model,
@@ -170,10 +183,12 @@ class Router:
         delay = self.retry_backoff_s * (2**attempt) * (0.5 + random.random())
         await asyncio.sleep(min(delay, 8.0))
 
-    def _annotate_cost(self, response: ChatResponse, model: str) -> ChatResponse:
-        cost = estimate_cost(response.usage, self.catalog.get(model))
+    def _annotate_cost(self, response: ChatResponse, route: ModelRoute) -> ChatResponse:
+        cost = estimate_cost(response.usage, self.catalog.get(route.model), provider=route.provider)
         if cost is not None:
             response.usage.cost = cost
+        response.model = route.model
+        response.provider = route.provider
         return response
 
     def chat(self, request: ChatRequest) -> tuple[ChatResponse, list[AttemptRecord]]:
@@ -195,13 +210,12 @@ class Router:
         for route in routes:
             self._check_budget(request, route)
             provider = self._get_provider(route)
-            route_request = request.model_copy(update={"model": route.model})
+            route_request = self._route_request(request, route, stream=False)
             for retry in range(self.max_retries + 1):
                 started = time.perf_counter()
                 try:
                     response = provider.chat(route_request)
-                    response = self._annotate_cost(response, route.model)
-                    response.provider = route.provider
+                    response = self._annotate_cost(response, route)
                     response.attempts = len(attempts) + 1
                     attempts.append(
                         AttemptRecord(
@@ -246,13 +260,12 @@ class Router:
         for route in routes:
             self._check_budget(request, route)
             provider = self._get_provider(route)
-            route_request = request.model_copy(update={"model": route.model})
+            route_request = self._route_request(request, route, stream=False)
             for retry in range(self.max_retries + 1):
                 started = time.perf_counter()
                 try:
                     response = await provider.achat(route_request)
-                    response = self._annotate_cost(response, route.model)
-                    response.provider = route.provider
+                    response = self._annotate_cost(response, route)
                     response.attempts = len(attempts) + 1
                     attempts.append(
                         AttemptRecord(
@@ -303,7 +316,7 @@ class Router:
         for route in routes:
             self._check_budget(request, route)
             provider = self._get_provider(route)
-            route_request = request.model_copy(update={"model": route.model, "stream": True})
+            route_request = self._route_request(request, route, stream=True)
             started = time.perf_counter()
             content_parts: list[str] = []
             usage = Usage()
@@ -318,7 +331,9 @@ class Router:
                         usage = chunk.usage
                     if chunk.finish_reason:
                         finish = chunk.finish_reason
-                    yield chunk
+                    yield chunk.model_copy(
+                        update={"model": route.model, "provider": route.provider}
+                    )
                 latency_ms = (time.perf_counter() - started) * 1000
                 attempts.append(AttemptRecord(route.model, route.provider, latency_ms=latency_ms))
                 from enroute.types import Choice, Message
@@ -337,7 +352,7 @@ class Router:
                     latency_ms=latency_ms,
                     attempts=len(attempts),
                 )
-                response = self._annotate_cost(response, route.model)
+                response = self._annotate_cost(response, route)
                 if on_complete:
                     on_complete(response, attempts)
                 return
@@ -378,7 +393,7 @@ class Router:
         for route in routes:
             self._check_budget(request, route)
             provider = self._get_provider(route)
-            route_request = request.model_copy(update={"model": route.model, "stream": True})
+            route_request = self._route_request(request, route, stream=True)
             started = time.perf_counter()
             content_parts: list[str] = []
             usage = Usage()
@@ -393,7 +408,9 @@ class Router:
                         usage = chunk.usage
                     if chunk.finish_reason:
                         finish = chunk.finish_reason
-                    yield chunk
+                    yield chunk.model_copy(
+                        update={"model": route.model, "provider": route.provider}
+                    )
                 latency_ms = (time.perf_counter() - started) * 1000
                 attempts.append(AttemptRecord(route.model, route.provider, latency_ms=latency_ms))
                 from enroute.types import Choice, Message
@@ -412,7 +429,7 @@ class Router:
                     latency_ms=latency_ms,
                     attempts=len(attempts),
                 )
-                response = self._annotate_cost(response, route.model)
+                response = self._annotate_cost(response, route)
                 if on_complete:
                     on_complete(response, attempts)
                 return

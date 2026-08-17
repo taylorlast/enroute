@@ -23,14 +23,19 @@ from enroute.providers.anthropic import AnthropicProvider
 from enroute.providers.base import Provider
 from enroute.providers.google import GoogleProvider
 from enroute.providers.openai_compatible import (
+    BasetenProvider,
     DeepSeekProvider,
     FireworksProvider,
     GroqProvider,
+    MetaProvider,
     MistralProvider,
+    MoonshotProvider,
     OpenAICompatible,
     OpenAIProvider,
+    QwenProvider,
     TogetherProvider,
     XAIProvider,
+    ZhipuProvider,
 )
 from enroute.routing.policies import RoutingPolicy
 from enroute.routing.router import AttemptRecord, Router
@@ -47,9 +52,14 @@ _PROVIDER_CTORS: dict[str, type] = {
     "groq": GroqProvider,
     "together": TogetherProvider,
     "fireworks": FireworksProvider,
+    "baseten": BasetenProvider,
     "xai": XAIProvider,
     "deepseek": DeepSeekProvider,
     "mistral": MistralProvider,
+    "meta": MetaProvider,
+    "moonshot": MoonshotProvider,
+    "qwen": QwenProvider,
+    "zhipu": ZhipuProvider,
 }
 
 
@@ -171,9 +181,14 @@ class Enroute:
             "groq": "GROQ_API_KEY",
             "together": "TOGETHER_API_KEY",
             "fireworks": "FIREWORKS_API_KEY",
+            "baseten": "BASETEN_API_KEY",
             "xai": "XAI_API_KEY",
             "deepseek": "DEEPSEEK_API_KEY",
             "mistral": "MISTRAL_API_KEY",
+            "meta": "META_API_KEY",
+            "moonshot": "MOONSHOT_API_KEY",
+            "qwen": "DASHSCOPE_API_KEY",
+            "zhipu": "ZAI_API_KEY",
         }
         if not providers and not api_key:
             for slug, env_name in env_map.items():

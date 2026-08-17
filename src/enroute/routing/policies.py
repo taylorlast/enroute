@@ -10,13 +10,13 @@ Examples:
     >>> from enroute.types import ChatRequest, Message
     >>> catalog = ModelCatalog()
     >>> req = ChatRequest(
-    ...     model="openai/gpt-4o",
+    ...     model="openai/gpt-5.6-sol",
     ...     messages=[Message(role="user", content="hi")],
-    ...     models=["openai/gpt-4o-mini", "google/gemini-2.5-flash"],
+    ...     models=["openai/gpt-5.6-luna", "google/gemini-3.7-flash"],
     ... )
     >>> routes = LeastCost().select(req, req.models or [], catalog)
     >>> routes[0].model
-    'openai/gpt-4o'
+    'openai/gpt-5.6-sol'
 """
 
 from __future__ import annotations
@@ -34,12 +34,14 @@ class ModelRoute(BaseModel):
 
     Attributes:
         model: Model id in ``author/slug`` form.
-        provider: Provider slug that should serve the request.
+        provider: Host slug that should serve the request.
+        upstream_id: Model id the host expects, when different from ``model``.
         priority: Lower values are tried first.
     """
 
     model: str
     provider: str
+    upstream_id: str | None = None
     priority: int = 0
 
 
@@ -66,13 +68,62 @@ class RoutingPolicy(Protocol):
         ...
 
 
-def _provider_for(model_id: str, catalog: ModelCatalog) -> str:
+def _author_for(model_id: str, catalog: ModelCatalog) -> str:
     spec = catalog.get(model_id)
     if spec is not None:
         return spec.provider
     if "/" in model_id:
         return model_id.split("/", 1)[0]
     return model_id
+
+
+def routes_for_model(
+    model_id: str,
+    catalog: ModelCatalog,
+    *,
+    priority_base: int = 0,
+) -> list[ModelRoute]:
+    """Expand a catalog model into host routes (US hosts first).
+
+    Args:
+        model_id: Canonical ``author/slug`` id.
+        catalog: Model catalog.
+        priority_base: Starting priority for this model's endpoints.
+
+    Returns:
+        Ordered host routes for the model.
+    """
+    spec = catalog.get(model_id)
+    if spec is None:
+        return [
+            ModelRoute(
+                model=model_id,
+                provider=_author_for(model_id, catalog),
+                upstream_id=None,
+                priority=priority_base,
+            )
+        ]
+    return [
+        ModelRoute(
+            model=model_id,
+            provider=endpoint.provider,
+            upstream_id=endpoint.upstream_id,
+            priority=priority_base + index,
+        )
+        for index, endpoint in enumerate(spec.ordered_endpoints())
+    ]
+
+
+def expand_models(model_ids: list[str], catalog: ModelCatalog) -> list[ModelRoute]:
+    """Expand each candidate model into its host routes, keeping model order.
+
+    Returns:
+        Every host route for the candidates, ordered by model then endpoint priority.
+    """
+    routes: list[ModelRoute] = []
+    for index, model_id in enumerate(model_ids):
+        routes.extend(routes_for_model(model_id, catalog, priority_base=index * 10))
+    return routes
 
 
 def _apply_provider_prefs(
@@ -84,15 +135,15 @@ def _apply_provider_prefs(
     result = routes
     if prefs.only:
         allowed = set(prefs.only)
-        result = [r for r in result if r.provider in allowed]
+        result = [route for route in result if route.provider in allowed]
     if prefs.ignore:
         ignored = set(prefs.ignore)
-        result = [r for r in result if r.provider not in ignored]
+        result = [route for route in result if route.provider not in ignored]
     if prefs.order:
         order = {name: i for i, name in enumerate(prefs.order)}
-        preferred = [r for r in result if r.provider in order]
-        preferred.sort(key=lambda r: order[r.provider])
-        rest = [r for r in result if r.provider not in order]
+        preferred = [route for route in result if route.provider in order]
+        preferred.sort(key=lambda route: order[route.provider])
+        rest = [route for route in result if route.provider not in order]
         result = preferred + rest if prefs.allow_fallbacks else preferred
     return result
 
@@ -100,15 +151,17 @@ def _apply_provider_prefs(
 class Explicit:
     """Use the request's model (and optional ``models`` fallbacks) as-is.
 
+    Multi-host models expand to US endpoints first, then the lab host.
+
     Examples:
         >>> from enroute.catalog import ModelCatalog
         >>> from enroute.types import ChatRequest, Message
         >>> policy = Explicit()
         >>> req = ChatRequest(
-        ...     model="openai/gpt-4o-mini", messages=[Message(role="user", content="x")]
+        ...     model="openai/gpt-5.6-luna", messages=[Message(role="user", content="x")]
         ... )
         >>> policy.select(req, [req.model], ModelCatalog())[0].model
-        'openai/gpt-4o-mini'
+        'openai/gpt-5.6-luna'
     """
 
     def select(
@@ -117,7 +170,7 @@ class Explicit:
         candidates: list[str],
         catalog: ModelCatalog,
     ) -> list[ModelRoute]:
-        """Return routes in candidate order.
+        """Return routes in candidate order, expanding multi-host models.
 
         Args:
             request: The chat request.
@@ -127,11 +180,7 @@ class Explicit:
         Returns:
             Ordered routes.
         """
-        routes = [
-            ModelRoute(model=m, provider=_provider_for(m, catalog), priority=i)
-            for i, m in enumerate(candidates)
-        ]
-        return _apply_provider_prefs(routes, request.provider)
+        return _apply_provider_prefs(expand_models(candidates, catalog), request.provider)
 
 
 class Fallback(Explicit):
@@ -142,7 +191,8 @@ class LeastCost:
     """Prefer cheaper models among candidates after the primary.
 
     The primary model remains first; remaining candidates are sorted by
-    estimated prompt+completion price (using equal token weights).
+    estimated prompt+completion price (using equal token weights). Each
+    model then expands to its host endpoints (US first).
     """
 
     def select(
@@ -163,28 +213,24 @@ class LeastCost:
         """
         if not candidates:
             return []
-        primary = candidates[0]
-        rest = list(candidates[1:])
 
         def price_key(model_id: str) -> float:
             spec = catalog.get(model_id)
-            if spec is None or spec.pricing is None:
+            if spec is None:
                 return float("inf")
-            return spec.pricing.prompt + spec.pricing.completion
+            pricing = spec.pricing_for()
+            if pricing is None:
+                return float("inf")
+            return pricing.prompt + pricing.completion
 
-        rest.sort(key=price_key)
-        ordered = [primary, *rest]
-        routes = [
-            ModelRoute(model=m, provider=_provider_for(m, catalog), priority=i)
-            for i, m in enumerate(ordered)
-        ]
         if request.provider and request.provider.sort == "price":
-            all_sorted = sorted(candidates, key=price_key)
-            routes = [
-                ModelRoute(model=m, provider=_provider_for(m, catalog), priority=i)
-                for i, m in enumerate(all_sorted)
-            ]
-        return _apply_provider_prefs(routes, request.provider)
+            ordered = sorted(candidates, key=price_key)
+        else:
+            primary = candidates[0]
+            rest = list(candidates[1:])
+            rest.sort(key=price_key)
+            ordered = [primary, *rest]
+        return _apply_provider_prefs(expand_models(ordered, catalog), request.provider)
 
 
 class LowestLatency:
@@ -197,13 +243,18 @@ class LowestLatency:
     _LATENCY_RANK: dict[str, int] = {
         "groq": 0,
         "fireworks": 1,
-        "together": 2,
-        "deepseek": 3,
-        "google": 4,
-        "openai": 5,
-        "xai": 6,
-        "mistral": 7,
-        "anthropic": 8,
+        "baseten": 2,
+        "together": 3,
+        "deepseek": 4,
+        "google": 5,
+        "openai": 6,
+        "xai": 7,
+        "meta": 8,
+        "mistral": 9,
+        "anthropic": 10,
+        "moonshot": 20,
+        "qwen": 21,
+        "zhipu": 22,
     }
 
     def select(
@@ -222,16 +273,12 @@ class LowestLatency:
         Returns:
             Ordered routes.
         """
-        ranked = sorted(
-            candidates,
-            key=lambda m: self._LATENCY_RANK.get(_provider_for(m, catalog), 100),
-        )
-        # Keep primary first unless sort=latency is requested.
-        if not (request.provider and request.provider.sort == "latency") and candidates:
-            primary = candidates[0]
-            ranked = [primary] + [m for m in ranked if m != primary]
-        routes = [
-            ModelRoute(model=m, provider=_provider_for(m, catalog), priority=i)
-            for i, m in enumerate(ranked)
-        ]
+        routes = expand_models(candidates, catalog)
+        if request.provider and request.provider.sort == "latency":
+            routes.sort(key=lambda route: self._LATENCY_RANK.get(route.provider, 100))
+        elif candidates:
+            primary = [route for route in routes if route.model == candidates[0]]
+            rest = [route for route in routes if route.model != candidates[0]]
+            rest.sort(key=lambda route: self._LATENCY_RANK.get(route.provider, 100))
+            routes = primary + rest
         return _apply_provider_prefs(routes, request.provider)

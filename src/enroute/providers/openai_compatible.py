@@ -44,13 +44,15 @@ from enroute.types import (
 def _strip_author_prefix(model: str) -> str:
     """Strip ``author/`` prefix for providers that expect bare model ids.
 
+    Host paths such as ``accounts/fireworks/models/...`` are left intact.
+
     Args:
         model: Model id, optionally prefixed with ``author/``.
 
     Returns:
         Bare model id without the author prefix.
     """
-    if "/" in model:
+    if model.count("/") == 1:
         return model.split("/", 1)[1]
     return model
 
@@ -353,3 +355,40 @@ class MistralProvider(OpenAICompatible):
 
     name = "mistral"
     default_base_url = "https://api.mistral.ai/v1"
+
+
+class BasetenProvider(OpenAICompatible):
+    """Baseten Model APIs (OpenAI-compatible)."""
+
+    name = "baseten"
+    default_base_url = "https://inference.baseten.co/v1"
+    strip_model_prefix = False
+
+
+class MetaProvider(OpenAICompatible):
+    """Meta Model API (OpenAI-compatible)."""
+
+    name = "meta"
+    default_base_url = "https://api.meta.ai/v1"
+    strip_model_prefix = False
+
+
+class MoonshotProvider(OpenAICompatible):
+    """Moonshot / Kimi lab API."""
+
+    name = "moonshot"
+    default_base_url = "https://api.moonshot.ai/v1"
+
+
+class QwenProvider(OpenAICompatible):
+    """Qwen via DashScope compatible-mode."""
+
+    name = "qwen"
+    default_base_url = "https://dashscope.aliyuncs.com/compatible-mode/v1"
+
+
+class ZhipuProvider(OpenAICompatible):
+    """Zhipu / Z.ai lab API."""
+
+    name = "zhipu"
+    default_base_url = "https://api.z.ai/api/paas/v4"

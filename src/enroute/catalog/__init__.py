@@ -11,6 +11,7 @@ from __future__ import annotations
 from enroute.catalog.models import (
     Architecture,
     ModelCatalog,
+    ModelEndpoint,
     ModelPricing,
     ModelSpec,
     estimate_cost,
@@ -19,6 +20,7 @@ from enroute.catalog.models import (
 __all__ = [
     "Architecture",
     "ModelCatalog",
+    "ModelEndpoint",
     "ModelPricing",
     "ModelSpec",
     "estimate_cost",
