@@ -380,6 +380,40 @@ def diff_catalog(
     return result
 
 
+SPEC_KEY_ORDER = (
+    "id",
+    "name",
+    "context_length",
+    "pricing",
+    "architecture",
+    "supported_parameters",
+    "endpoints",
+)
+
+
+def order_spec_keys(spec: Mapping[str, Any]) -> dict[str, Any]:
+    """Put catalog entry keys in a stable order.
+
+    A price added to an entry that had none would otherwise land at the end,
+    which makes the review diff harder to read than it needs to be.
+
+    Args:
+        spec: A single catalog entry.
+
+    Returns:
+        The same entry with known keys first, in canonical order.
+
+    Examples:
+        >>> list(order_spec_keys({"endpoints": [], "id": "a/b"}))
+        ['id', 'endpoints']
+    """
+    ordered = {key: spec[key] for key in SPEC_KEY_ORDER if key in spec}
+    for key in spec:
+        if key not in ordered:
+            ordered[key] = spec[key]
+    return ordered
+
+
 def _spec_from_upstream(model: UpstreamModel) -> dict[str, Any]:
     """Build a catalog entry for a newly discovered model.
 
@@ -462,7 +496,7 @@ def apply_diff(
 
     return {
         "updated_at": stamped.strftime("%Y-%m-%dT%H:%M:%SZ"),
-        "models": [entries[key] for key in sorted(entries)],
+        "models": [order_spec_keys(entries[key]) for key in sorted(entries)],
     }
 
 

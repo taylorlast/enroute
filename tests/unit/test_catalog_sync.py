@@ -158,6 +158,14 @@ def test_apply_leaves_new_unpriced_models_without_pricing() -> None:
     assert "pricing" not in spec
 
 
+def test_apply_keeps_keys_in_canonical_order() -> None:
+    current = {"models": [{"id": "openai/gpt-x", "endpoints": [], "name": "GPT-X"}]}
+    upstream = {"openai/gpt-x": UpstreamModel(id="openai/gpt-x", prompt=1e-6, completion=2e-6)}
+    changes = diff_catalog(current, upstream, set())
+    spec = apply_diff(current, upstream, changes)["models"][0]
+    assert list(spec) == ["id", "name", "pricing", "endpoints"]
+
+
 def test_report_flags_unpriced_additions() -> None:
     changes = diff_catalog({"models": []}, {"a/b": UpstreamModel(id="a/b")}, {"b"})
     report = render_report(changes)
