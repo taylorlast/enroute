@@ -78,13 +78,18 @@ and `eu-west-1` both bill as `eu`.
 ## Streaming
 
 Both stream. Azure uses server-sent events like OpenAI. Bedrock replies in the
-binary `vnd.amazon.eventstream` framing, which is decoded into the same
-`StreamChunk` type, so callers see no difference:
+binary `vnd.amazon.eventstream` framing. The adapters decode both into the same
+`StreamChunk` type, so callers print tokens the same way they would for any
+other host:
 
 ```python
 for chunk in client.stream(model="openai/gpt-5.6-sol", messages=[...]):
     print(chunk.delta.content or "", end="")
 ```
+
+Hosted gateways must serialize with `chunk.to_openai()`, never `chunk.raw`.
+`raw` is the vendor event (SSE, Gemini, or Bedrock) and is not a client
+contract. The OpenAI Chat Completions SSE object is.
 
 Usage on a Bedrock stream arrives only in the trailing `metadata` event. Enroute
 waits for it before costing the request, so a stream is billed on real token

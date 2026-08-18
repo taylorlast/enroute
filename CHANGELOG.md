@@ -7,6 +7,19 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+
+- `StreamChunk.to_openai()` so a hosted gateway can emit one OpenAI Chat Completions
+  SSE shape from every host. `raw` stays on the chunk for debugging and is not
+  part of the client contract.
+- Live stream smoke tests that pin `provider.only` for each configured key.
+
+### Fixed
+
+- Anthropic streams now carry `input_tokens` from `message_start` onto the usage
+  chunk, so a streamed prompt is billed at the real token count.
+- OpenAI-compatible hosts that 400 on `stream_options` are retried without it.
+
 ## [0.1.0] - 2026-08-13
 
 ### Added

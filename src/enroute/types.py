@@ -413,6 +413,45 @@ class StreamChunk(BaseModel):
     region: str | None = None
     raw: dict[str, Any] | None = None
 
+    def to_openai(self) -> dict[str, Any]:
+        """Serialize this chunk as an OpenAI Chat Completions SSE object.
+
+        Every adapter yields :class:`StreamChunk`. Hosted gateways and HTTP
+        clients that speak the OpenAI wire format must call this rather than
+        forwarding :attr:`raw`, which is the provider-native event and is not
+        a stable client contract.
+
+        Returns:
+            A ``chat.completion.chunk`` object. ``usage`` is present only when
+            the host reported it, typically on the last chunk.
+        """
+        finish = self.finish_reason
+        if isinstance(finish, FinishReason):
+            finish = finish.value
+        payload: dict[str, Any] = {
+            "id": self.id,
+            "object": "chat.completion.chunk",
+            "model": self.model,
+            "choices": [
+                {
+                    "index": 0,
+                    "delta": self.delta.model_dump(mode="json", exclude_none=True),
+                    "finish_reason": finish,
+                }
+            ],
+        }
+        if self.usage is not None:
+            payload["usage"] = {
+                "prompt_tokens": self.usage.prompt_tokens,
+                "completion_tokens": self.usage.completion_tokens,
+                "total_tokens": self.usage.total_tokens,
+            }
+        if self.provider:
+            payload["provider"] = self.provider
+        if self.region:
+            payload["region"] = self.region
+        return payload
+
 
 def text_content(message: Message) -> str:
     """Extract plain text from a message.

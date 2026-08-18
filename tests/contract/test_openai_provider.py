@@ -80,3 +80,42 @@ def test_openai_stream(provider: OpenAIProvider) -> None:
         )
     )
     assert "".join(c.delta.content or "" for c in chunks) == "Hello"
+    payload = chunks[0].to_openai()
+    assert payload["object"] == "chat.completion.chunk"
+    assert payload["choices"][0]["delta"]["content"] == "He"
+
+
+@respx.mock
+def test_openai_stream_retries_without_stream_options(provider: OpenAIProvider) -> None:
+    calls: list[dict] = []
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        body = json.loads(request.content)
+        calls.append(body)
+        if "stream_options" in body:
+            return httpx.Response(
+                400,
+                json={"error": {"message": "Unknown parameter: 'stream_options'"}},
+            )
+        sse = (
+            'data: {"id":"1","model":"gpt-4o-mini","choices":[{"delta":{"content":"ok"}}]}\n\n'
+            "data: [DONE]\n\n"
+        )
+        return httpx.Response(
+            200, content=sse.encode(), headers={"Content-Type": "text/event-stream"}
+        )
+
+    respx.post("https://api.openai.com/v1/chat/completions").mock(side_effect=handler)
+    chunks = list(
+        provider.stream(
+            ChatRequest(
+                model="openai/gpt-4o-mini",
+                messages=[Message(role="user", content="Hi")],
+                stream=True,
+            )
+        )
+    )
+    assert "".join(c.delta.content or "" for c in chunks) == "ok"
+    assert len(calls) == 2
+    assert "stream_options" in calls[0]
+    assert "stream_options" not in calls[1]

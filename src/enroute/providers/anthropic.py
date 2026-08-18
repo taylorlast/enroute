@@ -226,6 +226,94 @@ class AnthropicProvider:
             response.json(), latency_ms=(time.perf_counter() - started) * 1000
         )
 
+    def _finish_reason(self, stop: str | None) -> FinishReason | str | None:
+        """Map an Anthropic stop reason onto the shared finish enum.
+
+        Args:
+            stop: Anthropic ``stop_reason`` value.
+
+        Returns:
+            A :class:`~enroute.types.FinishReason`, the raw string, or ``None``.
+        """
+        if stop == "end_turn":
+            return FinishReason.STOP
+        if stop == "max_tokens":
+            return FinishReason.LENGTH
+        if stop == "tool_use":
+            return FinishReason.TOOL_CALLS
+        return stop
+
+    def _chunk_from_event(
+        self,
+        event: dict[str, Any],
+        *,
+        message_id: str,
+        model: str,
+        prompt_tokens: int,
+    ) -> tuple[StreamChunk | None, str, str, int]:
+        """Translate one Anthropic SSE event into a normalized chunk.
+
+        ``message_start`` carries ``input_tokens``. ``message_delta`` usually
+        carries only ``output_tokens``. Both are needed to bill a stream.
+
+        Args:
+            event: Parsed Anthropic SSE JSON object.
+            message_id: Completion id accumulated from ``message_start``.
+            model: Upstream model id accumulated from ``message_start``.
+            prompt_tokens: Input tokens accumulated from ``message_start``.
+
+        Returns:
+            ``(chunk, message_id, model, prompt_tokens)``. ``chunk`` is
+            ``None`` for events that do not produce a client-visible delta.
+        """
+        etype = event.get("type")
+        if etype == "message_start":
+            msg = event.get("message") or {}
+            message_id = str(msg.get("id") or message_id)
+            model = str(msg.get("model") or model)
+            usage_raw = msg.get("usage") or {}
+            prompt_tokens = int(usage_raw.get("input_tokens") or prompt_tokens)
+            return None, message_id, model, prompt_tokens
+        if etype == "content_block_delta":
+            delta = event.get("delta") or {}
+            if delta.get("type") == "text_delta" and delta.get("text"):
+                return (
+                    StreamChunk(
+                        id=message_id,
+                        model=model,
+                        delta=StreamDelta(content=delta.get("text")),
+                        provider=self.name,
+                        raw=event,
+                    ),
+                    message_id,
+                    model,
+                    prompt_tokens,
+                )
+            return None, message_id, model, prompt_tokens
+        if etype == "message_delta":
+            usage_raw = event.get("usage") or {}
+            if usage_raw.get("input_tokens") is not None:
+                prompt_tokens = int(usage_raw["input_tokens"])
+            return (
+                StreamChunk(
+                    id=message_id,
+                    model=model,
+                    finish_reason=self._finish_reason(
+                        (event.get("delta") or {}).get("stop_reason")
+                    ),
+                    usage=Usage.from_counts(
+                        prompt_tokens,
+                        int(usage_raw.get("output_tokens") or 0),
+                    ),
+                    provider=self.name,
+                    raw=event,
+                ),
+                message_id,
+                model,
+                prompt_tokens,
+            )
+        return None, message_id, model, prompt_tokens
+
     def stream(self, request: ChatRequest) -> Iterator[StreamChunk]:
         """Execute a streaming Messages API call.
 
@@ -238,49 +326,19 @@ class AnthropicProvider:
         payload = self._encode_request(request, stream=True)
         message_id = ""
         model = self._model_id(request.model)
+        prompt_tokens = 0
         try:
             with self._client.stream("POST", "/v1/messages", json=payload) as response:
                 raise_for_status(response, provider=self.name, model=request.model)
                 for data in iter_sse_lines(response):
-                    event = json.loads(data)
-                    etype = event.get("type")
-                    if etype == "message_start":
-                        msg = event.get("message") or {}
-                        message_id = str(msg.get("id") or "")
-                        model = str(msg.get("model") or model)
-                    elif etype == "content_block_delta":
-                        delta = event.get("delta") or {}
-                        if delta.get("type") == "text_delta":
-                            yield StreamChunk(
-                                id=message_id,
-                                model=model,
-                                delta=StreamDelta(content=delta.get("text")),
-                                provider=self.name,
-                                raw=event,
-                            )
-                    elif etype == "message_delta":
-                        usage_raw = event.get("usage") or {}
-                        stop = (event.get("delta") or {}).get("stop_reason")
-                        finish = (
-                            FinishReason.STOP
-                            if stop == "end_turn"
-                            else FinishReason.LENGTH
-                            if stop == "max_tokens"
-                            else FinishReason.TOOL_CALLS
-                            if stop == "tool_use"
-                            else stop
-                        )
-                        yield StreamChunk(
-                            id=message_id,
-                            model=model,
-                            finish_reason=finish,
-                            usage=Usage.from_counts(
-                                0,
-                                int(usage_raw.get("output_tokens") or 0),
-                            ),
-                            provider=self.name,
-                            raw=event,
-                        )
+                    chunk, message_id, model, prompt_tokens = self._chunk_from_event(
+                        json.loads(data),
+                        message_id=message_id,
+                        model=model,
+                        prompt_tokens=prompt_tokens,
+                    )
+                    if chunk is not None:
+                        yield chunk
         except EnrouteError:
             raise
         except Exception as exc:  # noqa: BLE001
@@ -318,49 +376,19 @@ class AnthropicProvider:
         payload = self._encode_request(request, stream=True)
         message_id = ""
         model = self._model_id(request.model)
+        prompt_tokens = 0
         try:
             async with self._aclient.stream("POST", "/v1/messages", json=payload) as response:
                 raise_for_status(response, provider=self.name, model=request.model)
                 async for data in aiter_sse_lines(response):
-                    event = json.loads(data)
-                    etype = event.get("type")
-                    if etype == "message_start":
-                        msg = event.get("message") or {}
-                        message_id = str(msg.get("id") or "")
-                        model = str(msg.get("model") or model)
-                    elif etype == "content_block_delta":
-                        delta = event.get("delta") or {}
-                        if delta.get("type") == "text_delta":
-                            yield StreamChunk(
-                                id=message_id,
-                                model=model,
-                                delta=StreamDelta(content=delta.get("text")),
-                                provider=self.name,
-                                raw=event,
-                            )
-                    elif etype == "message_delta":
-                        usage_raw = event.get("usage") or {}
-                        stop = (event.get("delta") or {}).get("stop_reason")
-                        finish = (
-                            FinishReason.STOP
-                            if stop == "end_turn"
-                            else FinishReason.LENGTH
-                            if stop == "max_tokens"
-                            else FinishReason.TOOL_CALLS
-                            if stop == "tool_use"
-                            else stop
-                        )
-                        yield StreamChunk(
-                            id=message_id,
-                            model=model,
-                            finish_reason=finish,
-                            usage=Usage.from_counts(
-                                0,
-                                int(usage_raw.get("output_tokens") or 0),
-                            ),
-                            provider=self.name,
-                            raw=event,
-                        )
+                    chunk, message_id, model, prompt_tokens = self._chunk_from_event(
+                        json.loads(data),
+                        message_id=message_id,
+                        model=model,
+                        prompt_tokens=prompt_tokens,
+                    )
+                    if chunk is not None:
+                        yield chunk
         except EnrouteError:
             raise
         except Exception as exc:  # noqa: BLE001

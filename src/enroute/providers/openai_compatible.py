@@ -19,7 +19,7 @@ from typing import Any
 
 import httpx
 
-from enroute.errors import EnrouteError
+from enroute.errors import EnrouteError, InvalidRequestError
 from enroute.providers.base import (
     ProviderConfig,
     aiter_sse_lines,
@@ -120,7 +120,9 @@ class OpenAICompatible:
     def _model_id(self, model: str) -> str:
         return _strip_author_prefix(model) if self.strip_model_prefix else model
 
-    def _encode_request(self, request: ChatRequest, *, stream: bool) -> dict[str, Any]:
+    def _encode_request(
+        self, request: ChatRequest, *, stream: bool, include_usage: bool = True
+    ) -> dict[str, Any]:
         payload: dict[str, Any] = {
             "model": self._model_id(request.model),
             "messages": [m.model_dump(exclude_none=True) for m in request.messages],
@@ -134,10 +136,27 @@ class OpenAICompatible:
             payload["tools"] = [t.model_dump(exclude_none=True) for t in request.tools]
         if request.response_format is not None:
             payload["response_format"] = request.response_format.model_dump(exclude_none=True)
-        if stream:
+        if stream and include_usage:
             payload["stream_options"] = {"include_usage": True}
         payload.update(request.extra)
         return payload
+
+    def _rejected_stream_options(self, exc: EnrouteError) -> bool:
+        """Whether a 400 is the host refusing ``stream_options``.
+
+        Several OpenAI-compatible clones 400 on the field. The stream still
+        works without it; usage just arrives later or not at all.
+
+        Args:
+            exc: Classified error from the first stream attempt.
+
+        Returns:
+            ``True`` when the request should be retried without the field.
+        """
+        if not isinstance(exc, InvalidRequestError) or exc.status_code != 400:
+            return False
+        blob = f"{exc.message} {exc.body}".lower()
+        return "stream_options" in blob
 
     def _parse_message(self, raw: dict[str, Any]) -> Message:
         tool_calls = None
@@ -236,6 +255,48 @@ class OpenAICompatible:
         latency_ms = (time.perf_counter() - started) * 1000
         return self._parse_response(response.json(), latency_ms=latency_ms)
 
+    def _iter_sse(self, request: ChatRequest, *, include_usage: bool) -> Iterator[StreamChunk]:
+        """Read one OpenAI-compatible SSE response into stream chunks.
+
+        Args:
+            request: Normalized chat request.
+            include_usage: Whether to send ``stream_options.include_usage``.
+
+        Yields:
+            Normalized stream chunks from the host.
+        """
+        payload = self._encode_request(request, stream=True, include_usage=include_usage)
+        with self._client.stream("POST", "/chat/completions", json=payload) as response:
+            if not response.is_success:
+                response.read()
+            raise_for_status(response, provider=self.name, model=request.model)
+            for data in iter_sse_lines(response):
+                if data == "[DONE]":
+                    break
+                yield self._parse_stream_chunk(json.loads(data))
+
+    async def _aiter_sse(
+        self, request: ChatRequest, *, include_usage: bool
+    ) -> AsyncIterator[StreamChunk]:
+        """Async variant of :meth:`_iter_sse`.
+
+        Args:
+            request: Normalized chat request.
+            include_usage: Whether to send ``stream_options.include_usage``.
+
+        Yields:
+            Normalized stream chunks from the host.
+        """
+        payload = self._encode_request(request, stream=True, include_usage=include_usage)
+        async with self._aclient.stream("POST", "/chat/completions", json=payload) as response:
+            if not response.is_success:
+                await response.aread()
+            raise_for_status(response, provider=self.name, model=request.model)
+            async for data in aiter_sse_lines(response):
+                if data == "[DONE]":
+                    break
+                yield self._parse_stream_chunk(json.loads(data))
+
     def stream(self, request: ChatRequest) -> Iterator[StreamChunk]:
         """Execute a streaming chat completion.
 
@@ -245,14 +306,16 @@ class OpenAICompatible:
         Yields:
             Normalized stream chunks.
         """
-        payload = self._encode_request(request, stream=True)
         try:
-            with self._client.stream("POST", "/chat/completions", json=payload) as response:
-                raise_for_status(response, provider=self.name, model=request.model)
-                for data in iter_sse_lines(response):
-                    if data == "[DONE]":
-                        break
-                    yield self._parse_stream_chunk(json.loads(data))
+            yield from self._iter_sse(request, include_usage=True)
+            return
+        except EnrouteError as exc:
+            if not self._rejected_stream_options(exc):
+                raise
+        except Exception as exc:  # noqa: BLE001
+            raise map_transport_error(exc, provider=self.name, model=request.model) from exc
+        try:
+            yield from self._iter_sse(request, include_usage=False)
         except EnrouteError:
             raise
         except Exception as exc:  # noqa: BLE001
@@ -286,14 +349,18 @@ class OpenAICompatible:
         Yields:
             Normalized stream chunks.
         """
-        payload = self._encode_request(request, stream=True)
         try:
-            async with self._aclient.stream("POST", "/chat/completions", json=payload) as response:
-                raise_for_status(response, provider=self.name, model=request.model)
-                async for data in aiter_sse_lines(response):
-                    if data == "[DONE]":
-                        break
-                    yield self._parse_stream_chunk(json.loads(data))
+            async for chunk in self._aiter_sse(request, include_usage=True):
+                yield chunk
+            return
+        except EnrouteError as exc:
+            if not self._rejected_stream_options(exc):
+                raise
+        except Exception as exc:  # noqa: BLE001
+            raise map_transport_error(exc, provider=self.name, model=request.model) from exc
+        try:
+            async for chunk in self._aiter_sse(request, include_usage=False):
+                yield chunk
         except EnrouteError:
             raise
         except Exception as exc:  # noqa: BLE001
