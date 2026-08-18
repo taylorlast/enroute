@@ -7,6 +7,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.3.1] - 2026-08-18
+
 ### Added
 
 - `StreamChunk.to_openai()` so a hosted gateway can emit one OpenAI Chat Completions
@@ -32,5 +34,6 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Environments (tasks, tools, scorers), versioned datasets, and benchmark reports.
 - Docs site (MkDocs) and cookbook-style routing examples.
 
-[Unreleased]: https://github.com/taylorlast/enroute/compare/v0.1.0...HEAD
+[Unreleased]: https://github.com/taylorlast/enroute/compare/v0.3.1...HEAD
+[0.3.1]: https://github.com/taylorlast/enroute/releases/tag/v0.3.1
 [0.1.0]: https://github.com/taylorlast/enroute/releases/tag/v0.1.0
