@@ -28,6 +28,7 @@ from enroute.providers.openai_compatible import (
     XAIProvider,
     ZhipuProvider,
 )
+from enroute.providers.openai_responses import OpenAIResponsesProvider
 
 __all__ = [
     "AnthropicProvider",
@@ -43,6 +44,7 @@ __all__ = [
     "MoonshotProvider",
     "OpenAICompatible",
     "OpenAIProvider",
+    "OpenAIResponsesProvider",
     "Provider",
     "ProviderConfig",
     "QwenProvider",

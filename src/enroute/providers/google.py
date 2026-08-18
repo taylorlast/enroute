@@ -18,8 +18,15 @@ import httpx
 from enroute.errors import EnrouteError
 from enroute.providers.base import (
     ProviderConfig,
+    araise_for_stream_status,
     map_transport_error,
     raise_for_status,
+    raise_for_stream_status,
+)
+from enroute.providers.structured import (
+    gemini_schema,
+    structured_schema,
+    wants_json_object,
 )
 from enroute.types import (
     ChatRequest,
@@ -44,6 +51,9 @@ class GoogleProvider:
         base_url: API base URL.
         timeout_s: Request timeout in seconds.
         default_headers: Extra headers.
+        include_thoughts: Whether to ask Gemini for its thought summaries.
+            Gemini reasons whether or not they are requested, and withholds them
+            unless asked, which makes a thinking model look like a stalled one.
     """
 
     name: str = "google"
@@ -56,7 +66,9 @@ class GoogleProvider:
         base_url: str | None = None,
         timeout_s: float = 60.0,
         default_headers: dict[str, str] | None = None,
+        include_thoughts: bool = True,
     ) -> None:
+        self._include_thoughts = include_thoughts
         self.config = ProviderConfig(
             api_key=api_key,
             base_url=(base_url or self.default_base_url).rstrip("/"),
@@ -131,6 +143,14 @@ class GoogleProvider:
             generation["stopSequences"] = (
                 [request.stop] if isinstance(request.stop, str) else list(request.stop)
             )
+        schema = structured_schema(request)
+        if schema is not None:
+            generation["responseMimeType"] = "application/json"
+            generation["responseSchema"] = gemini_schema(schema)
+        elif wants_json_object(request):
+            generation["responseMimeType"] = "application/json"
+        if self._include_thoughts:
+            generation["thinkingConfig"] = {"includeThoughts": True}
         if generation:
             payload["generationConfig"] = generation
         if request.tools:
@@ -159,10 +179,15 @@ class GoogleProvider:
         candidate = (data.get("candidates") or [{}])[0]
         parts = ((candidate.get("content") or {}).get("parts")) or []
         text_parts: list[str] = []
+        reasoning_parts: list[str] = []
         tool_calls: list[ToolCall] = []
         for i, part in enumerate(parts):
             if "text" in part:
-                text_parts.append(part["text"])
+                # Gemini flags reasoning as an ordinary text part with thought set.
+                if part.get("thought"):
+                    reasoning_parts.append(part["text"])
+                else:
+                    text_parts.append(part["text"])
             if "functionCall" in part:
                 fc = part["functionCall"]
                 tool_calls.append(
@@ -194,6 +219,7 @@ class GoogleProvider:
                         role="assistant",
                         content="".join(text_parts) if text_parts else None,
                         tool_calls=tool_calls or None,
+                        reasoning="".join(reasoning_parts) or None,
                     ),
                     finish_reason=finish,
                 )
@@ -204,10 +230,46 @@ class GoogleProvider:
             latency_ms=latency_ms,
         )
 
-    def _parse_stream_chunk(self, data: dict[str, Any], *, model: str) -> StreamChunk:
+    def _parse_stream_chunk(
+        self, data: dict[str, Any], *, model: str, tool_index: int = 0
+    ) -> tuple[StreamChunk, int]:
+        """Translate one Gemini SSE payload into a normalized chunk.
+
+        Gemini sends each ``functionCall`` complete rather than as argument
+        fragments, so a call is emitted as a single OpenAI tool-call delta.
+
+        Args:
+            data: Parsed Gemini streaming payload.
+            model: Upstream model id.
+            tool_index: Next free position in OpenAI's ``tool_calls`` array.
+
+        Returns:
+            ``(chunk, tool_index)`` with ``tool_index`` advanced past any calls
+            emitted by this payload.
+        """
         candidate = (data.get("candidates") or [{}])[0]
         parts = ((candidate.get("content") or {}).get("parts")) or []
-        text = "".join(p.get("text") or "" for p in parts if "text" in p)
+        text_parts: list[str] = []
+        reasoning_parts: list[str] = []
+        tool_calls: list[dict[str, Any]] = []
+        for part in parts:
+            if "text" in part:
+                target = reasoning_parts if part.get("thought") else text_parts
+                target.append(part["text"] or "")
+            if "functionCall" in part:
+                call = part["functionCall"]
+                tool_calls.append(
+                    {
+                        "index": tool_index,
+                        "id": f"call_{tool_index}",
+                        "type": "function",
+                        "function": {
+                            "name": call.get("name") or "",
+                            "arguments": json.dumps(call.get("args") or {}),
+                        },
+                    }
+                )
+                tool_index += 1
         finish_map = {
             "STOP": FinishReason.STOP,
             "MAX_TOKENS": FinishReason.LENGTH,
@@ -220,10 +282,16 @@ class GoogleProvider:
                 int(um.get("promptTokenCount") or 0),
                 int(um.get("candidatesTokenCount") or 0),
             )
-        return StreamChunk(
+        text = "".join(text_parts)
+        reasoning = "".join(reasoning_parts)
+        chunk = StreamChunk(
             id=str(data.get("responseId") or ""),
             model=model,
-            delta=StreamDelta(content=text or None),
+            delta=StreamDelta(
+                content=text or None,
+                reasoning=reasoning or None,
+                tool_calls=tool_calls or None,
+            ),
             finish_reason=finish_map.get(
                 candidate.get("finishReason"), candidate.get("finishReason")
             ),
@@ -231,6 +299,7 @@ class GoogleProvider:
             provider=self.name,
             raw=data,
         )
+        return chunk, tool_index
 
     def chat(self, request: ChatRequest) -> ChatResponse:
         """Execute a non-streaming generateContent call.
@@ -266,6 +335,7 @@ class GoogleProvider:
         """
         model = self._model_id(request.model)
         payload = self._encode_request(request)
+        tool_index = 0
         try:
             with self._client.stream(
                 "POST",
@@ -273,14 +343,17 @@ class GoogleProvider:
                 params={"alt": "sse"},
                 json=payload,
             ) as response:
-                raise_for_status(response, provider=self.name, model=request.model)
+                raise_for_stream_status(response, provider=self.name, model=request.model)
                 for line in response.iter_lines():
                     if not line or not line.startswith("data:"):
                         continue
                     data = line[5:].strip()
                     if not data:
                         continue
-                    yield self._parse_stream_chunk(json.loads(data), model=model)
+                    chunk, tool_index = self._parse_stream_chunk(
+                        json.loads(data), model=model, tool_index=tool_index
+                    )
+                    yield chunk
         except EnrouteError:
             raise
         except Exception as exc:  # noqa: BLE001
@@ -320,6 +393,7 @@ class GoogleProvider:
         """
         model = self._model_id(request.model)
         payload = self._encode_request(request)
+        tool_index = 0
         try:
             async with self._aclient.stream(
                 "POST",
@@ -327,14 +401,17 @@ class GoogleProvider:
                 params={"alt": "sse"},
                 json=payload,
             ) as response:
-                raise_for_status(response, provider=self.name, model=request.model)
+                await araise_for_stream_status(response, provider=self.name, model=request.model)
                 async for line in response.aiter_lines():
                     if not line or not line.startswith("data:"):
                         continue
                     data = line[5:].strip()
                     if not data:
                         continue
-                    yield self._parse_stream_chunk(json.loads(data), model=model)
+                    chunk, tool_index = self._parse_stream_chunk(
+                        json.loads(data), model=model, tool_index=tool_index
+                    )
+                    yield chunk
         except EnrouteError:
             raise
         except Exception as exc:  # noqa: BLE001

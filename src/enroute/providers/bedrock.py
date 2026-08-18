@@ -31,6 +31,7 @@ import json
 import struct
 import time
 from collections.abc import AsyncIterator, Iterator, Mapping
+from dataclasses import dataclass, field
 from typing import Any
 from urllib.parse import quote, urlsplit
 
@@ -40,8 +41,17 @@ from enroute.catalog.models import normalize_region
 from enroute.errors import ConfigurationError, EnrouteError
 from enroute.providers.base import (
     ProviderConfig,
+    araise_for_stream_status,
     map_transport_error,
     raise_for_status,
+    raise_for_stream_status,
+)
+from enroute.providers.structured import (
+    JSON_ONLY_INSTRUCTION,
+    STRUCTURED_TOOL_DESCRIPTION,
+    schema_tool_name,
+    structured_schema,
+    wants_json_object,
 )
 from enroute.types import (
     ChatRequest,
@@ -334,6 +344,33 @@ def _finish_reason(stop: Any) -> FinishReason | str | None:
     return _STOP_REASONS.get(str(stop), str(stop))
 
 
+@dataclass
+class _BedrockStreamState:
+    """Cross-event state for one ConverseStream response.
+
+    Converse indexes content blocks, and argument fragments only make sense
+    relative to the block that opened them, so the mapping from block index to
+    OpenAI tool-call position is kept for the life of the stream.
+    """
+
+    tool_slots: dict[int, int] = field(default_factory=dict)
+    structured_blocks: dict[int, bool] = field(default_factory=dict)
+    structured_tool: str | None = None
+
+    def tool_slot(self, block_index: int) -> int:
+        """Assign this block the next position in OpenAI's ``tool_calls`` array.
+
+        Args:
+            block_index: Converse content block index.
+
+        Returns:
+            The stable OpenAI array position for the block.
+        """
+        if block_index not in self.tool_slots:
+            self.tool_slots[block_index] = len(self.tool_slots)
+        return self.tool_slots[block_index]
+
+
 class BedrockProvider:
     """Amazon Bedrock via the Converse and ConverseStream APIs.
 
@@ -455,12 +492,23 @@ class BedrockProvider:
                     }
                 )
                 continue
-            if msg.role == "assistant" and msg.tool_calls:
+            if msg.role == "assistant" and (msg.tool_calls or msg.reasoning):
                 content: list[dict[str, Any]] = []
+                if msg.reasoning and msg.reasoning_signature:
+                    content.append(
+                        {
+                            "reasoningContent": {
+                                "reasoningText": {
+                                    "text": msg.reasoning,
+                                    "signature": msg.reasoning_signature,
+                                }
+                            }
+                        }
+                    )
                 text = text_content(msg)
                 if text:
                     content.append({"text": text})
-                for call in msg.tool_calls:
+                for call in msg.tool_calls or []:
                     try:
                         arguments = json.loads(call.function.arguments)
                     except json.JSONDecodeError:
@@ -479,6 +527,8 @@ class BedrockProvider:
             messages.append({"role": msg.role, "content": [{"text": text_content(msg)}]})
 
         payload: dict[str, Any] = {"messages": messages}
+        if wants_json_object(request):
+            system.append({"text": JSON_ONLY_INSTRUCTION})
         if system:
             payload["system"] = system
         inference: dict[str, Any] = {}
@@ -510,8 +560,44 @@ class BedrockProvider:
                     for tool in request.tools
                 ]
             }
+            if request.tool_choice is not None:
+                choice = self._tool_choice(request.tool_choice)
+                if choice is not None:
+                    payload["toolConfig"]["toolChoice"] = choice
+        elif (tool_name := schema_tool_name(request)) is not None:
+            payload["toolConfig"] = {
+                "tools": [
+                    {
+                        "toolSpec": {
+                            "name": tool_name,
+                            "description": STRUCTURED_TOOL_DESCRIPTION,
+                            "inputSchema": {"json": structured_schema(request)},
+                        }
+                    }
+                ],
+                "toolChoice": {"tool": {"name": tool_name}},
+            }
         payload.update(request.extra)
         return payload
+
+    def _tool_choice(self, choice: str | dict[str, Any]) -> dict[str, Any] | None:
+        """Translate an OpenAI ``tool_choice`` into Converse's shape.
+
+        Args:
+            choice: OpenAI-style tool choice, either a keyword or a forced tool.
+
+        Returns:
+            A Converse ``toolChoice`` object, or ``None`` when Converse has no
+            equivalent and the default behaviour should stand.
+        """
+        if isinstance(choice, str):
+            if choice == "required":
+                return {"any": {}}
+            if choice == "auto":
+                return {"auto": {}}
+            return None
+        name = (choice.get("function") or {}).get("name")
+        return {"tool": {"name": name}} if name else None
 
     def _usage(self, raw: Mapping[str, Any] | None) -> Usage:
         data = raw or {}
@@ -520,16 +606,30 @@ class BedrockProvider:
         )
 
     def _parse_response(
-        self, data: dict[str, Any], *, model: str, latency_ms: float
+        self,
+        data: dict[str, Any],
+        *,
+        model: str,
+        latency_ms: float,
+        structured_tool: str | None = None,
     ) -> ChatResponse:
         message_raw = (data.get("output") or {}).get("message") or {}
         text_parts: list[str] = []
+        reasoning_parts: list[str] = []
+        signature: str | None = None
         tool_calls: list[ToolCall] = []
         for block in message_raw.get("content") or []:
             if "text" in block:
                 text_parts.append(block["text"] or "")
+            elif "reasoningContent" in block:
+                reasoning_text = (block["reasoningContent"] or {}).get("reasoningText") or {}
+                reasoning_parts.append(reasoning_text.get("text") or "")
+                signature = reasoning_text.get("signature") or signature
             elif "toolUse" in block:
                 use = block["toolUse"]
+                if use.get("name") == structured_tool:
+                    text_parts.append(json.dumps(use.get("input") or {}))
+                    continue
                 tool_calls.append(
                     ToolCall(
                         id=str(use.get("toolUseId") or ""),
@@ -540,15 +640,20 @@ class BedrockProvider:
                     )
                 )
         stop = data.get("stopReason")
+        finish = _finish_reason(stop)
+        if stop == "tool_use" and structured_tool:
+            finish = FinishReason.STOP
         message = Message(
             role="assistant",
             content="".join(text_parts) if text_parts else None,
             tool_calls=tool_calls or None,
+            reasoning="".join(reasoning_parts) or None,
+            reasoning_signature=signature,
         )
         return ChatResponse(
             id=str(data.get("id") or ""),
             model=model,
-            choices=[Choice(message=message, finish_reason=_finish_reason(stop))],
+            choices=[Choice(message=message, finish_reason=finish)],
             usage=self._usage(data.get("usage")),
             provider=self.name,
             region=self.region,
@@ -556,32 +661,129 @@ class BedrockProvider:
             latency_ms=latency_ms,
         )
 
-    def _chunk_from_event(
-        self, event_type: str, payload: bytes, *, model: str
+    def _chunk(self, delta: StreamDelta, body: dict[str, Any], *, model: str) -> StreamChunk:
+        """Wrap a delta in a chunk tagged with this provider's host and region.
+
+        Args:
+            delta: The normalized delta to emit.
+            body: Native Converse event, attached for debugging.
+            model: Upstream model id.
+
+        Returns:
+            A normalized stream chunk.
+        """
+        return StreamChunk(
+            id="",
+            model=model,
+            delta=delta,
+            provider=self.name,
+            region=self.region,
+            raw=body,
+        )
+
+    def _stream_delta(
+        self, body: dict[str, Any], state: _BedrockStreamState, *, model: str
     ) -> StreamChunk | None:
+        """Handle ``contentBlockDelta`` for text, reasoning, and tool arguments.
+
+        Args:
+            body: Parsed Converse event body.
+            state: Mutable stream state.
+            model: Upstream model id.
+
+        Returns:
+            A normalized chunk, or ``None`` for a delta with no payload.
+        """
+        index = int(body.get("contentBlockIndex") or 0)
+        delta = body.get("delta") or {}
+        text = delta.get("text")
+        if text is not None:
+            return self._chunk(StreamDelta(content=text), body, model=model)
+        reasoning = delta.get("reasoningContent") or {}
+        if reasoning:
+            if reasoning.get("text") is not None:
+                return self._chunk(StreamDelta(reasoning=reasoning["text"]), body, model=model)
+            if reasoning.get("signature") is not None:
+                return self._chunk(
+                    StreamDelta(reasoning_signature=reasoning["signature"]), body, model=model
+                )
+            return None
+        tool_use = delta.get("toolUse") or {}
+        fragment = tool_use.get("input")
+        if fragment is None:
+            return None
+        if state.structured_blocks.get(index):
+            return self._chunk(StreamDelta(content=fragment), body, model=model)
+        return self._chunk(
+            StreamDelta(
+                tool_calls=[
+                    {
+                        "index": state.tool_slot(index),
+                        "function": {"arguments": fragment},
+                    }
+                ]
+            ),
+            body,
+            model=model,
+        )
+
+    def _chunk_from_event(
+        self,
+        event_type: str,
+        payload: bytes,
+        *,
+        model: str,
+        state: _BedrockStreamState,
+    ) -> StreamChunk | None:
+        """Translate one Converse stream event into a normalized chunk.
+
+        Args:
+            event_type: Value of the frame's ``:event-type`` header.
+            payload: Raw JSON body of the frame.
+            model: Upstream model id.
+            state: Mutable stream state, updated in place.
+
+        Returns:
+            A normalized chunk, or ``None`` for events with no client-visible
+            delta.
+        """
         try:
             body = json.loads(payload) if payload else {}
         except json.JSONDecodeError:
             return None
-        if event_type == "contentBlockDelta":
-            delta = body.get("delta") or {}
-            text = delta.get("text")
-            if text is None:
+        if event_type == "contentBlockStart":
+            index = int(body.get("contentBlockIndex") or 0)
+            tool_use = (body.get("start") or {}).get("toolUse") or {}
+            if not tool_use:
                 return None
-            return StreamChunk(
-                id="",
+            if tool_use.get("name") == state.structured_tool:
+                state.structured_blocks[index] = True
+                return None
+            return self._chunk(
+                StreamDelta(
+                    tool_calls=[
+                        {
+                            "index": state.tool_slot(index),
+                            "id": tool_use.get("toolUseId") or "",
+                            "type": "function",
+                            "function": {"name": tool_use.get("name") or "", "arguments": ""},
+                        }
+                    ]
+                ),
+                body,
                 model=model,
-                delta=StreamDelta(content=text),
-                provider=self.name,
-                region=self.region,
-                raw=body,
             )
+        if event_type == "contentBlockDelta":
+            return self._stream_delta(body, state, model=model)
         if event_type == "messageStop":
             stop = body.get("stopReason")
+            finish = _finish_reason(stop)
+            if stop == "tool_use" and state.structured_tool:
+                finish = FinishReason.STOP
             return StreamChunk(
                 id="",
                 model=model,
-                finish_reason=_finish_reason(stop),
+                finish_reason=finish,
                 provider=self.name,
                 region=self.region,
                 raw=body,
@@ -619,6 +821,7 @@ class BedrockProvider:
             response.json(),
             model=request.model,
             latency_ms=(time.perf_counter() - started) * 1000,
+            structured_tool=schema_tool_name(request),
         )
 
     def stream(self, request: ChatRequest) -> Iterator[StreamChunk]:
@@ -633,15 +836,19 @@ class BedrockProvider:
         path = self._path(request.model, stream=True)
         body = json.dumps(self._encode_request(request)).encode("utf-8")
         decoder = EventStreamDecoder()
+        state = _BedrockStreamState(structured_tool=schema_tool_name(request))
         try:
             with self._client.stream(
                 "POST", path, content=body, headers=self._auth_headers(path, body)
             ) as response:
-                raise_for_status(response, provider=self.name, model=request.model)
+                raise_for_stream_status(response, provider=self.name, model=request.model)
                 for data in response.iter_bytes():
                     for headers, payload in decoder.feed(data):
                         chunk = self._chunk_from_event(
-                            headers.get(":event-type", ""), payload, model=request.model
+                            headers.get(":event-type", ""),
+                            payload,
+                            model=request.model,
+                            state=state,
                         )
                         if chunk is not None:
                             yield chunk
@@ -673,6 +880,7 @@ class BedrockProvider:
             response.json(),
             model=request.model,
             latency_ms=(time.perf_counter() - started) * 1000,
+            structured_tool=schema_tool_name(request),
         )
 
     async def astream(self, request: ChatRequest) -> AsyncIterator[StreamChunk]:
@@ -687,15 +895,19 @@ class BedrockProvider:
         path = self._path(request.model, stream=True)
         body = json.dumps(self._encode_request(request)).encode("utf-8")
         decoder = EventStreamDecoder()
+        state = _BedrockStreamState(structured_tool=schema_tool_name(request))
         try:
             async with self._aclient.stream(
                 "POST", path, content=body, headers=self._auth_headers(path, body)
             ) as response:
-                raise_for_status(response, provider=self.name, model=request.model)
+                await araise_for_stream_status(response, provider=self.name, model=request.model)
                 async for data in response.aiter_bytes():
                     for headers, payload in decoder.feed(data):
                         chunk = self._chunk_from_event(
-                            headers.get(":event-type", ""), payload, model=request.model
+                            headers.get(":event-type", ""),
+                            payload,
+                            model=request.model,
+                            state=state,
                         )
                         if chunk is not None:
                             yield chunk

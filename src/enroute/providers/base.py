@@ -198,6 +198,52 @@ def raise_for_status(
     )
 
 
+def raise_for_stream_status(
+    response: httpx.Response,
+    *,
+    provider: str,
+    model: str | None = None,
+) -> None:
+    """Raise a classified error for a failed streaming response.
+
+    A streaming response arrives with its body unread, and touching the body of
+    an unread response raises from httpx instead of surfacing the host's error.
+    Reading first is what turns a failed stream into a usable message.
+
+    Args:
+        response: The streaming HTTP response.
+        provider: Provider slug.
+        model: Model id if known.
+
+    Raises:
+        EnrouteError: When the status code indicates failure.
+    """
+    if not response.is_success:
+        response.read()
+    raise_for_status(response, provider=provider, model=model)
+
+
+async def araise_for_stream_status(
+    response: httpx.Response,
+    *,
+    provider: str,
+    model: str | None = None,
+) -> None:
+    """Async variant of :func:`raise_for_stream_status`.
+
+    Args:
+        response: The streaming HTTP response.
+        provider: Provider slug.
+        model: Model id if known.
+
+    Raises:
+        EnrouteError: When the status code indicates failure.
+    """
+    if not response.is_success:
+        await response.aread()
+    raise_for_status(response, provider=provider, model=model)
+
+
 def map_transport_error(exc: Exception, *, provider: str, model: str | None = None) -> EnrouteError:
     """Map httpx transport errors to enroute errors.
 

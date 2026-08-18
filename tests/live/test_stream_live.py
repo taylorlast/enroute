@@ -8,18 +8,16 @@ wire object from ``to_openai()``.
 from __future__ import annotations
 
 import os
+import time
 
 import pytest
+from hosts import cheapest_model, live_cases
 
 from enroute import Enroute, Message
 
 pytestmark = pytest.mark.live
 
-CASES = [
-    ("OPENAI_API_KEY", "openai", "openai/gpt-4o-mini"),
-    ("ANTHROPIC_API_KEY", "anthropic", "anthropic/claude-sonnet-4"),
-    ("GOOGLE_API_KEY", "google", "google/gemini-2.5-flash"),
-]
+CASES = live_cases()
 
 
 def _has_azure() -> bool:
@@ -33,27 +31,23 @@ def _has_bedrock() -> bool:
     )
 
 
-if _has_azure():
-    CASES.append(("AZURE_OPENAI_API_KEY", "azure", "openai/gpt-5.6-sol"))
-if _has_bedrock():
-    CASES.append(("AWS_REGION", "bedrock", "openai/gpt-5.6-sol"))
+for _host, _available in (("azure", _has_azure()), ("bedrock", _has_bedrock())):
+    if _available:
+        _model = cheapest_model(_host)
+        if _model is not None:
+            CASES.append((_host, _model))
 
 
-@pytest.mark.parametrize(("env_key", "host", "model"), CASES)
-def test_live_stream_is_openai_shaped(env_key: str, host: str, model: str) -> None:
-    if host == "azure" and not _has_azure():
-        pytest.skip("Azure is not configured")
-    if host == "bedrock" and not _has_bedrock():
-        pytest.skip("Bedrock is not configured")
-    if not os.environ.get(env_key):
-        pytest.skip(f"{env_key} not set")
-
+@pytest.mark.parametrize(("host", "model"), CASES)
+def test_live_stream_is_openai_shaped(host: str, model: str) -> None:
     with Enroute() as client:
         chunks = list(
             client.stream(
                 model=model,
                 messages=[Message(role="user", content="Reply with the word pong only.")],
-                max_tokens=16,
+                # Thinking models spend output tokens before writing anything, so a
+                # tight cap yields an empty answer and a misleading failure.
+                max_tokens=1024,
                 provider={"only": [host]},
             )
         )
@@ -67,3 +61,31 @@ def test_live_stream_is_openai_shaped(env_key: str, host: str, model: str) -> No
     usage = next((c.usage for c in reversed(chunks) if c.usage), None)
     assert usage is not None
     assert usage.completion_tokens >= 0
+
+
+@pytest.mark.parametrize(("host", "model"), CASES)
+def test_live_stream_arrives_incrementally(host: str, model: str) -> None:
+    """Output must arrive progressively rather than in one final burst.
+
+    Asked for a long answer, because a short one fits in a single delta on most
+    hosts and would pass even against a fully buffered transport. Reasoning
+    counts as output: Gemini flushes its prose in a batch at the end but streams
+    thought summaries as it goes, and a caller watching either one can tell the
+    difference between a working stream and a hung socket.
+    """
+    started = time.perf_counter()
+    arrivals: list[float] = []
+    with Enroute() as client:
+        for chunk in client.stream(
+            model=model,
+            messages=[
+                Message(role="user", content="Write 300 words about a lighthouse. Plain prose.")
+            ],
+            max_tokens=4096,
+            provider={"only": [host]},
+        ):
+            if chunk.delta.content or chunk.delta.reasoning:
+                arrivals.append(time.perf_counter() - started)
+
+    assert len(arrivals) > 1, "host sent everything in one delta"
+    assert arrivals[0] < arrivals[-1]

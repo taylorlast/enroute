@@ -65,6 +65,7 @@ nav:
       - Routing policy: concepts/routing.md
       - Sink: concepts/sink.md
   - Guides:
+      - Streaming, tools, structured output: guides/capabilities.md
       - Routing examples walkthrough: guides/routing-examples.md
       - Capture traces from an app: guides/capture-traces.md
       - Production traffic to a dataset: guides/production-to-dataset.md

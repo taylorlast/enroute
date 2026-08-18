@@ -163,6 +163,12 @@ class Message(BaseModel):
         name: Optional participant name.
         tool_calls: Tool calls requested by the assistant, if any.
         tool_call_id: Id of the tool call this message responds to (tool role).
+        reasoning: Reasoning ("thinking") text the model produced before its
+            answer. Separate from ``content`` because callers usually render it
+            differently, and some hosts bill it as output tokens.
+        reasoning_signature: Host-issued attestation for ``reasoning``.
+            Anthropic and Bedrock reject a thinking block replayed without it,
+            so it has to survive a round trip.
 
     Examples:
         >>> Message(role="user", content="Hello").role
@@ -176,6 +182,8 @@ class Message(BaseModel):
     name: str | None = None
     tool_calls: list[ToolCall] | None = None
     tool_call_id: str | None = None
+    reasoning: str | None = None
+    reasoning_signature: str | None = None
 
 
 class ResponseFormat(BaseModel):
@@ -382,11 +390,18 @@ class StreamDelta(BaseModel):
     Attributes:
         role: Role, typically present only on the first delta.
         content: Incremental text content.
-        tool_calls: Incremental tool call fragments.
+        reasoning: Incremental reasoning ("thinking") text. Thinking models emit
+            this for seconds before any ``content`` appears, so a client that
+            ignores it looks frozen.
+        reasoning_signature: Incremental attestation for the reasoning block.
+        tool_calls: Incremental tool call fragments, in OpenAI's streaming shape
+            (``index``, ``id``, ``function.name``, ``function.arguments``).
     """
 
     role: str | None = None
     content: str | None = None
+    reasoning: str | None = None
+    reasoning_signature: str | None = None
     tool_calls: list[dict[str, Any]] | None = None
 
 

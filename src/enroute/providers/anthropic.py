@@ -11,6 +11,7 @@ from __future__ import annotations
 import json
 import time
 from collections.abc import AsyncIterator, Iterator
+from dataclasses import dataclass, field
 from typing import Any
 
 import httpx
@@ -19,9 +20,18 @@ from enroute.errors import EnrouteError
 from enroute.providers.base import (
     ProviderConfig,
     aiter_sse_lines,
+    araise_for_stream_status,
     iter_sse_lines,
     map_transport_error,
     raise_for_status,
+    raise_for_stream_status,
+)
+from enroute.providers.structured import (
+    JSON_ONLY_INSTRUCTION,
+    STRUCTURED_TOOL_DESCRIPTION,
+    schema_tool_name,
+    structured_schema,
+    wants_json_object,
 )
 from enroute.types import (
     ChatRequest,
@@ -36,6 +46,37 @@ from enroute.types import (
     Usage,
     text_content,
 )
+
+
+@dataclass
+class _StreamState:
+    """Cross-event state for one Anthropic stream.
+
+    Anthropic describes a response as indexed content blocks, so a delta only
+    means something in the context of the block it belongs to: identical
+    ``input_json_delta`` events belong to different tool calls. Usage is split
+    across the first and last event, so both are accumulated here.
+    """
+
+    message_id: str = ""
+    model: str = ""
+    prompt_tokens: int = 0
+    block_types: dict[int, str] = field(default_factory=dict)
+    tool_slots: dict[int, int] = field(default_factory=dict)
+    structured_tool: str | None = None
+
+    def tool_slot(self, block_index: int) -> int:
+        """Assign this block the next position in OpenAI's ``tool_calls`` array.
+
+        Args:
+            block_index: Anthropic content block index.
+
+        Returns:
+            The stable OpenAI array position for the block.
+        """
+        if block_index not in self.tool_slots:
+            self.tool_slots[block_index] = len(self.tool_slots)
+        return self.tool_slots[block_index]
 
 
 class AnthropicProvider:
@@ -110,12 +151,22 @@ class AnthropicProvider:
                     }
                 )
                 continue
-            if msg.role == "assistant" and msg.tool_calls:
+            if msg.role == "assistant" and (msg.tool_calls or msg.reasoning):
                 content: list[dict[str, Any]] = []
+                # A replayed thinking block must lead the message and carry its
+                # signature, or Anthropic rejects the turn.
+                if msg.reasoning and msg.reasoning_signature:
+                    content.append(
+                        {
+                            "type": "thinking",
+                            "thinking": msg.reasoning,
+                            "signature": msg.reasoning_signature,
+                        }
+                    )
                 text = text_content(msg)
                 if text:
                     content.append({"type": "text", "text": text})
-                for tc in msg.tool_calls:
+                for tc in msg.tool_calls or []:
                     try:
                         args = json.loads(tc.function.arguments)
                     except json.JSONDecodeError:
@@ -138,6 +189,8 @@ class AnthropicProvider:
             "max_tokens": request.max_tokens or 4096,
             "stream": stream,
         }
+        if wants_json_object(request):
+            system_parts.append(JSON_ONLY_INSTRUCTION)
         if system_parts:
             payload["system"] = "\n\n".join(system_parts)
         if request.temperature is not None:
@@ -157,16 +210,66 @@ class AnthropicProvider:
                 }
                 for t in request.tools
             ]
+            if request.tool_choice is not None:
+                payload["tool_choice"] = self._tool_choice(request.tool_choice)
+        elif (tool_name := schema_tool_name(request)) is not None:
+            payload["tools"] = [
+                {
+                    "name": tool_name,
+                    "description": STRUCTURED_TOOL_DESCRIPTION,
+                    "input_schema": structured_schema(request),
+                }
+            ]
+            payload["tool_choice"] = {"type": "tool", "name": tool_name}
         payload.update(request.extra)
         return payload
 
-    def _parse_response(self, data: dict[str, Any], *, latency_ms: float) -> ChatResponse:
+    def _tool_choice(self, choice: str | dict[str, Any]) -> dict[str, Any]:
+        """Translate an OpenAI ``tool_choice`` into Anthropic's shape.
+
+        Args:
+            choice: OpenAI-style tool choice, either a keyword or a forced tool.
+
+        Returns:
+            Anthropic's ``tool_choice`` object.
+        """
+        if isinstance(choice, str):
+            if choice == "required":
+                return {"type": "any"}
+            if choice == "none":
+                return {"type": "none"}
+            return {"type": "auto"}
+        name = (choice.get("function") or {}).get("name")
+        if name:
+            return {"type": "tool", "name": name}
+        return {"type": "auto"}
+
+    def _parse_response(
+        self,
+        data: dict[str, Any],
+        *,
+        latency_ms: float,
+        structured_tool: str | None = None,
+    ) -> ChatResponse:
         text_parts: list[str] = []
+        reasoning_parts: list[str] = []
+        signature: str | None = None
         tool_calls: list[ToolCall] = []
         for block in data.get("content") or []:
-            if block.get("type") == "text":
+            kind = block.get("type")
+            if kind == "text":
                 text_parts.append(block.get("text") or "")
-            elif block.get("type") == "tool_use":
+            elif kind == "thinking":
+                reasoning_parts.append(block.get("thinking") or "")
+                signature = block.get("signature") or signature
+            elif kind == "redacted_thinking":
+                signature = block.get("data") or signature
+            elif kind == "tool_use":
+                if block.get("name") == structured_tool:
+                    # The forced tool is our own structured-output shim, so its
+                    # input is the answer, not a call the caller should see.
+                    text_parts.append(json.dumps(block.get("input") or {}))
+                    continue
                 tool_calls.append(
                     ToolCall(
                         id=block["id"],
@@ -183,7 +286,7 @@ class AnthropicProvider:
         elif stop == "max_tokens":
             finish = FinishReason.LENGTH
         elif stop == "tool_use":
-            finish = FinishReason.TOOL_CALLS
+            finish = FinishReason.STOP if structured_tool else FinishReason.TOOL_CALLS
         else:
             finish = stop
         usage_raw = data.get("usage") or {}
@@ -195,6 +298,8 @@ class AnthropicProvider:
             role="assistant",
             content="".join(text_parts) if text_parts else None,
             tool_calls=tool_calls or None,
+            reasoning="".join(reasoning_parts) or None,
+            reasoning_signature=signature,
         )
         return ChatResponse(
             id=str(data.get("id") or ""),
@@ -223,7 +328,9 @@ class AnthropicProvider:
             raise map_transport_error(exc, provider=self.name, model=request.model) from exc
         raise_for_status(response, provider=self.name, model=request.model)
         return self._parse_response(
-            response.json(), latency_ms=(time.perf_counter() - started) * 1000
+            response.json(),
+            latency_ms=(time.perf_counter() - started) * 1000,
+            structured_tool=schema_tool_name(request),
         )
 
     def _finish_reason(self, stop: str | None) -> FinishReason | str | None:
@@ -243,76 +350,153 @@ class AnthropicProvider:
             return FinishReason.TOOL_CALLS
         return stop
 
-    def _chunk_from_event(
-        self,
-        event: dict[str, Any],
-        *,
-        message_id: str,
-        model: str,
-        prompt_tokens: int,
-    ) -> tuple[StreamChunk | None, str, str, int]:
-        """Translate one Anthropic SSE event into a normalized chunk.
+    def _chunk(self, state: _StreamState, delta: StreamDelta, event: dict[str, Any]) -> StreamChunk:
+        """Wrap a delta in a chunk carrying this stream's accumulated identity.
 
-        ``message_start`` carries ``input_tokens``. ``message_delta`` usually
-        carries only ``output_tokens``. Both are needed to bill a stream.
+        Args:
+            state: Stream state holding the completion id and model.
+            delta: The normalized delta to emit.
+            event: Native Anthropic event, attached for debugging.
+
+        Returns:
+            A normalized stream chunk.
+        """
+        return StreamChunk(
+            id=state.message_id,
+            model=state.model,
+            delta=delta,
+            provider=self.name,
+            raw=event,
+        )
+
+    def _block_start(self, event: dict[str, Any], state: _StreamState) -> StreamChunk | None:
+        """Handle ``content_block_start``, which opens a text, thinking, or tool block.
 
         Args:
             event: Parsed Anthropic SSE JSON object.
-            message_id: Completion id accumulated from ``message_start``.
-            model: Upstream model id accumulated from ``message_start``.
-            prompt_tokens: Input tokens accumulated from ``message_start``.
+            state: Mutable stream state.
 
         Returns:
-            ``(chunk, message_id, model, prompt_tokens)``. ``chunk`` is
-            ``None`` for events that do not produce a client-visible delta.
+            The opening ``tool_calls`` fragment for a tool block, else ``None``.
+        """
+        index = int(event.get("index") or 0)
+        block = event.get("content_block") or {}
+        kind = str(block.get("type") or "")
+        state.block_types[index] = kind
+        if kind != "tool_use":
+            return None
+        if block.get("name") == state.structured_tool:
+            return None
+        return self._chunk(
+            state,
+            StreamDelta(
+                tool_calls=[
+                    {
+                        "index": state.tool_slot(index),
+                        "id": block.get("id") or "",
+                        "type": "function",
+                        "function": {"name": block.get("name") or "", "arguments": ""},
+                    }
+                ]
+            ),
+            event,
+        )
+
+    def _block_delta(self, event: dict[str, Any], state: _StreamState) -> StreamChunk | None:
+        """Handle ``content_block_delta`` for text, thinking, and tool arguments.
+
+        Args:
+            event: Parsed Anthropic SSE JSON object.
+            state: Mutable stream state.
+
+        Returns:
+            A normalized chunk, or ``None`` for an empty delta.
+        """
+        index = int(event.get("index") or 0)
+        delta = event.get("delta") or {}
+        kind = delta.get("type")
+        if kind == "text_delta":
+            text = delta.get("text")
+            return self._chunk(state, StreamDelta(content=text), event) if text else None
+        if kind == "thinking_delta":
+            thinking = delta.get("thinking")
+            return self._chunk(state, StreamDelta(reasoning=thinking), event) if thinking else None
+        if kind == "signature_delta":
+            signature = delta.get("signature")
+            return (
+                self._chunk(state, StreamDelta(reasoning_signature=signature), event)
+                if signature
+                else None
+            )
+        if kind == "input_json_delta":
+            fragment = delta.get("partial_json")
+            if not fragment:
+                return None
+            if state.block_types.get(index) == "tool_use" and state.structured_tool:
+                # Structured output is a forced tool underneath, so its argument
+                # fragments are the JSON answer and stream as content.
+                return self._chunk(state, StreamDelta(content=fragment), event)
+            return self._chunk(
+                state,
+                StreamDelta(
+                    tool_calls=[
+                        {
+                            "index": state.tool_slot(index),
+                            "function": {"arguments": fragment},
+                        }
+                    ]
+                ),
+                event,
+            )
+        return None
+
+    def _chunk_from_event(self, event: dict[str, Any], state: _StreamState) -> StreamChunk | None:
+        """Translate one Anthropic SSE event into a normalized chunk.
+
+        ``message_start`` carries ``input_tokens`` while ``message_delta``
+        usually carries only ``output_tokens``, and both are needed to bill a
+        stream, so token counts accumulate on ``state``.
+
+        Args:
+            event: Parsed Anthropic SSE JSON object.
+            state: Mutable stream state, updated in place.
+
+        Returns:
+            A normalized chunk, or ``None`` for events with no client-visible
+            delta such as ``ping`` and ``content_block_stop``.
         """
         etype = event.get("type")
         if etype == "message_start":
             msg = event.get("message") or {}
-            message_id = str(msg.get("id") or message_id)
-            model = str(msg.get("model") or model)
+            state.message_id = str(msg.get("id") or state.message_id)
+            state.model = str(msg.get("model") or state.model)
             usage_raw = msg.get("usage") or {}
-            prompt_tokens = int(usage_raw.get("input_tokens") or prompt_tokens)
-            return None, message_id, model, prompt_tokens
+            state.prompt_tokens = int(usage_raw.get("input_tokens") or state.prompt_tokens)
+            return None
+        if etype == "content_block_start":
+            return self._block_start(event, state)
         if etype == "content_block_delta":
-            delta = event.get("delta") or {}
-            if delta.get("type") == "text_delta" and delta.get("text"):
-                return (
-                    StreamChunk(
-                        id=message_id,
-                        model=model,
-                        delta=StreamDelta(content=delta.get("text")),
-                        provider=self.name,
-                        raw=event,
-                    ),
-                    message_id,
-                    model,
-                    prompt_tokens,
-                )
-            return None, message_id, model, prompt_tokens
+            return self._block_delta(event, state)
         if etype == "message_delta":
             usage_raw = event.get("usage") or {}
             if usage_raw.get("input_tokens") is not None:
-                prompt_tokens = int(usage_raw["input_tokens"])
-            return (
-                StreamChunk(
-                    id=message_id,
-                    model=model,
-                    finish_reason=self._finish_reason(
-                        (event.get("delta") or {}).get("stop_reason")
-                    ),
-                    usage=Usage.from_counts(
-                        prompt_tokens,
-                        int(usage_raw.get("output_tokens") or 0),
-                    ),
-                    provider=self.name,
-                    raw=event,
+                state.prompt_tokens = int(usage_raw["input_tokens"])
+            stop = (event.get("delta") or {}).get("stop_reason")
+            finish = self._finish_reason(stop)
+            if stop == "tool_use" and state.structured_tool:
+                finish = FinishReason.STOP
+            return StreamChunk(
+                id=state.message_id,
+                model=state.model,
+                finish_reason=finish,
+                usage=Usage.from_counts(
+                    state.prompt_tokens,
+                    int(usage_raw.get("output_tokens") or 0),
                 ),
-                message_id,
-                model,
-                prompt_tokens,
+                provider=self.name,
+                raw=event,
             )
-        return None, message_id, model, prompt_tokens
+        return None
 
     def stream(self, request: ChatRequest) -> Iterator[StreamChunk]:
         """Execute a streaming Messages API call.
@@ -324,19 +508,15 @@ class AnthropicProvider:
             Normalized stream chunks.
         """
         payload = self._encode_request(request, stream=True)
-        message_id = ""
-        model = self._model_id(request.model)
-        prompt_tokens = 0
+        state = _StreamState(
+            model=self._model_id(request.model),
+            structured_tool=schema_tool_name(request),
+        )
         try:
             with self._client.stream("POST", "/v1/messages", json=payload) as response:
-                raise_for_status(response, provider=self.name, model=request.model)
+                raise_for_stream_status(response, provider=self.name, model=request.model)
                 for data in iter_sse_lines(response):
-                    chunk, message_id, model, prompt_tokens = self._chunk_from_event(
-                        json.loads(data),
-                        message_id=message_id,
-                        model=model,
-                        prompt_tokens=prompt_tokens,
-                    )
+                    chunk = self._chunk_from_event(json.loads(data), state)
                     if chunk is not None:
                         yield chunk
         except EnrouteError:
@@ -361,7 +541,9 @@ class AnthropicProvider:
             raise map_transport_error(exc, provider=self.name, model=request.model) from exc
         raise_for_status(response, provider=self.name, model=request.model)
         return self._parse_response(
-            response.json(), latency_ms=(time.perf_counter() - started) * 1000
+            response.json(),
+            latency_ms=(time.perf_counter() - started) * 1000,
+            structured_tool=schema_tool_name(request),
         )
 
     async def astream(self, request: ChatRequest) -> AsyncIterator[StreamChunk]:
@@ -374,19 +556,15 @@ class AnthropicProvider:
             Normalized stream chunks.
         """
         payload = self._encode_request(request, stream=True)
-        message_id = ""
-        model = self._model_id(request.model)
-        prompt_tokens = 0
+        state = _StreamState(
+            model=self._model_id(request.model),
+            structured_tool=schema_tool_name(request),
+        )
         try:
             async with self._aclient.stream("POST", "/v1/messages", json=payload) as response:
-                raise_for_status(response, provider=self.name, model=request.model)
+                await araise_for_stream_status(response, provider=self.name, model=request.model)
                 async for data in aiter_sse_lines(response):
-                    chunk, message_id, model, prompt_tokens = self._chunk_from_event(
-                        json.loads(data),
-                        message_id=message_id,
-                        model=model,
-                        prompt_tokens=prompt_tokens,
-                    )
+                    chunk = self._chunk_from_event(json.loads(data), state)
                     if chunk is not None:
                         yield chunk
         except EnrouteError:

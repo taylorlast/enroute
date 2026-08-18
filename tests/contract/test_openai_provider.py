@@ -10,7 +10,13 @@ from enroute.types import ChatRequest, Message
 
 @pytest.fixture
 def provider() -> OpenAIProvider:
-    return OpenAIProvider("sk-test", base_url="https://api.openai.com/v1")
+    """OpenAI pinned to Chat Completions.
+
+    ``transport="auto"`` prefers the Responses endpoint, which has its own suite
+    in ``test_openai_responses.py``. Pinning keeps these tests on the Chat
+    Completions translation, which every OpenAI-compatible clone also relies on.
+    """
+    return OpenAIProvider("sk-test", base_url="https://api.openai.com/v1", transport="chat")
 
 
 @respx.mock
@@ -119,3 +125,56 @@ def test_openai_stream_retries_without_stream_options(provider: OpenAIProvider) 
     assert len(calls) == 2
     assert "stream_options" in calls[0]
     assert "stream_options" not in calls[1]
+
+
+@respx.mock
+def test_openai_retries_with_max_completion_tokens(provider: OpenAIProvider) -> None:
+    """Newer OpenAI models 400 on max_tokens, which is enroute's normalized name."""
+    ok = {
+        "id": "chatcmpl-1",
+        "model": "gpt-5.6-luna",
+        "choices": [
+            {
+                "index": 0,
+                "message": {"role": "assistant", "content": "Hi"},
+                "finish_reason": "stop",
+            }
+        ],
+        "usage": {"prompt_tokens": 1, "completion_tokens": 1},
+    }
+    route = respx.post("https://api.openai.com/v1/chat/completions").mock(
+        side_effect=[
+            httpx.Response(
+                400,
+                json={
+                    "error": {
+                        "message": (
+                            "Unsupported parameter: 'max_tokens' is not supported with "
+                            "this model. Use 'max_completion_tokens' instead."
+                        ),
+                        "type": "invalid_request_error",
+                    }
+                },
+            ),
+            httpx.Response(200, json=ok),
+            httpx.Response(200, json=ok),
+        ]
+    )
+    request = ChatRequest(
+        model="openai/gpt-5.6-luna",
+        messages=[Message(role="user", content="Hi")],
+        max_tokens=32,
+    )
+    assert provider.chat(request).text == "Hi"
+
+    first = json.loads(route.calls[0].request.content)
+    second = json.loads(route.calls[1].request.content)
+    assert first["max_tokens"] == 32
+    assert "max_tokens" not in second
+    assert second["max_completion_tokens"] == 32
+
+    # The rejection is remembered, so the retry is not paid on every request.
+    provider.chat(request)
+    third = json.loads(route.calls[2].request.content)
+    assert third["max_completion_tokens"] == 32
+    assert len(route.calls) == 3
