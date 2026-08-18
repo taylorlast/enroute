@@ -393,6 +393,10 @@ class StreamDelta(BaseModel):
         reasoning: Incremental reasoning ("thinking") text. Thinking models emit
             this for seconds before any ``content`` appears, so a client that
             ignores it looks frozen.
+        reasoning_started: ``True`` when a thinking block opens. Some hosts
+            encrypt the tokens and send empty ``thinking_delta`` events; this
+            flag is how a UI learns the model is thinking anyway.
+        reasoning_finished: ``True`` when that thinking block closes.
         reasoning_signature: Incremental attestation for the reasoning block.
         tool_calls: Incremental tool call fragments, in OpenAI's streaming shape
             (``index``, ``id``, ``function.name``, ``function.arguments``).
@@ -401,6 +405,8 @@ class StreamDelta(BaseModel):
     role: str | None = None
     content: str | None = None
     reasoning: str | None = None
+    reasoning_started: bool | None = None
+    reasoning_finished: bool | None = None
     reasoning_signature: str | None = None
     tool_calls: list[dict[str, Any]] | None = None
 

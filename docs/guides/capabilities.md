@@ -99,9 +99,16 @@ Thinking models emit reasoning before any answer. It arrives on
 separate from `content` because callers usually render it differently.
 
 ```python
+thinking = False
 for chunk in client.stream(model=model, messages=messages):
+    if chunk.delta.reasoning_started:
+        thinking = True
+        render_thinking_started()
     if chunk.delta.reasoning:
         render_thinking(chunk.delta.reasoning)
+    if chunk.delta.reasoning_finished:
+        thinking = False
+        render_thinking_finished()
     if chunk.delta.content:
         render_answer(chunk.delta.content)
 ```
@@ -119,7 +126,9 @@ a thinking conversation. Reasoning is never sent to OpenAI-compatible hosts,
 which reject unknown message keys.
 
 !!! note "Some models encrypt their reasoning"
-    A host may return a reasoning block with a signature but no readable text.
-    That is the model's choice, not a dropped field. Whether reasoning happens
-    at all, and how much, is host-specific — pass those knobs through
-    `extra`, for example `extra={"output_config": {"effort": "high"}}`.
+    Anthropic's current models (Fable, Opus 5, Sonnet 5) often return a thinking
+    block with a signature but no readable text. `delta.reasoning` is empty;
+    `delta.reasoning_started` and `delta.reasoning_finished` still fire, which
+    is what a UI uses to show a thinking indicator the way Cursor does.
+    Anthropic requests ask for `thinking.type=adaptive` automatically. Override
+    or disable it with `extra={"thinking": ...}`.

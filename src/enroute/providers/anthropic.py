@@ -124,6 +124,9 @@ class AnthropicProvider:
             headers=headers,
             timeout=timeout_s,
         )
+        # Current Claude models reject ``thinking.type.enabled``. Adaptive is
+        # what they accept, and without it a thinking model sits silent.
+        self._thinking: dict[str, str | None] = {}
 
     def _model_id(self, model: str) -> str:
         if model.startswith("anthropic/"):
@@ -221,8 +224,48 @@ class AnthropicProvider:
                 }
             ]
             payload["tool_choice"] = {"type": "tool", "name": tool_name}
+        thinking = self._thinking_for(request)
+        if thinking is not None:
+            payload["thinking"] = {"type": thinking}
+            # Adaptive thinking rejects a custom temperature / top_p.
+            payload.pop("temperature", None)
+            payload.pop("top_p", None)
         payload.update(request.extra)
         return payload
+
+    def _thinking_for(self, request: ChatRequest) -> str | None:
+        """Thinking mode to request, unless the caller already set one.
+
+        Args:
+            request: Normalized chat request.
+
+        Returns:
+            ``"adaptive"`` by default, or ``None`` after the host rejected it.
+        """
+        if "thinking" in request.extra:
+            return None
+        return self._thinking.setdefault(self._model_id(request.model), "adaptive")
+
+    def _adapt_thinking(self, exc: EnrouteError, request: ChatRequest) -> bool:
+        """Drop automatic thinking when this model rejects it.
+
+        Args:
+            exc: Classified error from the previous attempt.
+            request: The request that failed.
+
+        Returns:
+            ``True`` when the request is worth retrying without thinking.
+        """
+        if exc.status_code != 400 or "thinking" in request.extra:
+            return False
+        blob = f"{exc.message} {exc.body}".lower()
+        if "thinking" not in blob:
+            return False
+        model = self._model_id(request.model)
+        if self._thinking.get(model) is None:
+            return False
+        self._thinking[model] = None
+        return True
 
     def _tool_choice(self, choice: str | dict[str, Any]) -> dict[str, Any]:
         """Translate an OpenAI ``tool_choice`` into Anthropic's shape.
@@ -320,18 +363,24 @@ class AnthropicProvider:
         Returns:
             Normalized chat response.
         """
-        payload = self._encode_request(request, stream=False)
-        started = time.perf_counter()
-        try:
-            response = self._client.post("/v1/messages", json=payload)
-        except Exception as exc:  # noqa: BLE001
-            raise map_transport_error(exc, provider=self.name, model=request.model) from exc
-        raise_for_status(response, provider=self.name, model=request.model)
-        return self._parse_response(
-            response.json(),
-            latency_ms=(time.perf_counter() - started) * 1000,
-            structured_tool=schema_tool_name(request),
-        )
+        while True:
+            payload = self._encode_request(request, stream=False)
+            started = time.perf_counter()
+            try:
+                response = self._client.post("/v1/messages", json=payload)
+            except Exception as exc:  # noqa: BLE001
+                raise map_transport_error(exc, provider=self.name, model=request.model) from exc
+            try:
+                raise_for_status(response, provider=self.name, model=request.model)
+            except EnrouteError as exc:
+                if self._adapt_thinking(exc, request):
+                    continue
+                raise
+            return self._parse_response(
+                response.json(),
+                latency_ms=(time.perf_counter() - started) * 1000,
+                structured_tool=schema_tool_name(request),
+            )
 
     def _finish_reason(self, stop: str | None) -> FinishReason | str | None:
         """Map an Anthropic stop reason onto the shared finish enum.
@@ -383,6 +432,8 @@ class AnthropicProvider:
         block = event.get("content_block") or {}
         kind = str(block.get("type") or "")
         state.block_types[index] = kind
+        if kind in {"thinking", "redacted_thinking"}:
+            return self._chunk(state, StreamDelta(reasoning_started=True), event)
         if kind != "tool_use":
             return None
         if block.get("name") == state.structured_tool:
@@ -477,6 +528,11 @@ class AnthropicProvider:
             return self._block_start(event, state)
         if etype == "content_block_delta":
             return self._block_delta(event, state)
+        if etype == "content_block_stop":
+            index = int(event.get("index") or 0)
+            if state.block_types.get(index) in {"thinking", "redacted_thinking"}:
+                return self._chunk(state, StreamDelta(reasoning_finished=True), event)
+            return None
         if etype == "message_delta":
             usage_raw = event.get("usage") or {}
             if usage_raw.get("input_tokens") is not None:
@@ -507,22 +563,26 @@ class AnthropicProvider:
         Yields:
             Normalized stream chunks.
         """
-        payload = self._encode_request(request, stream=True)
-        state = _StreamState(
-            model=self._model_id(request.model),
-            structured_tool=schema_tool_name(request),
-        )
-        try:
-            with self._client.stream("POST", "/v1/messages", json=payload) as response:
-                raise_for_stream_status(response, provider=self.name, model=request.model)
-                for data in iter_sse_lines(response):
-                    chunk = self._chunk_from_event(json.loads(data), state)
-                    if chunk is not None:
-                        yield chunk
-        except EnrouteError:
-            raise
-        except Exception as exc:  # noqa: BLE001
-            raise map_transport_error(exc, provider=self.name, model=request.model) from exc
+        while True:
+            payload = self._encode_request(request, stream=True)
+            state = _StreamState(
+                model=self._model_id(request.model),
+                structured_tool=schema_tool_name(request),
+            )
+            try:
+                with self._client.stream("POST", "/v1/messages", json=payload) as response:
+                    raise_for_stream_status(response, provider=self.name, model=request.model)
+                    for data in iter_sse_lines(response):
+                        chunk = self._chunk_from_event(json.loads(data), state)
+                        if chunk is not None:
+                            yield chunk
+                return
+            except EnrouteError as exc:
+                if self._adapt_thinking(exc, request):
+                    continue
+                raise
+            except Exception as exc:  # noqa: BLE001
+                raise map_transport_error(exc, provider=self.name, model=request.model) from exc
 
     async def achat(self, request: ChatRequest) -> ChatResponse:
         """Async non-streaming Messages API call.
@@ -533,18 +593,24 @@ class AnthropicProvider:
         Returns:
             Normalized chat response.
         """
-        payload = self._encode_request(request, stream=False)
-        started = time.perf_counter()
-        try:
-            response = await self._aclient.post("/v1/messages", json=payload)
-        except Exception as exc:  # noqa: BLE001
-            raise map_transport_error(exc, provider=self.name, model=request.model) from exc
-        raise_for_status(response, provider=self.name, model=request.model)
-        return self._parse_response(
-            response.json(),
-            latency_ms=(time.perf_counter() - started) * 1000,
-            structured_tool=schema_tool_name(request),
-        )
+        while True:
+            payload = self._encode_request(request, stream=False)
+            started = time.perf_counter()
+            try:
+                response = await self._aclient.post("/v1/messages", json=payload)
+            except Exception as exc:  # noqa: BLE001
+                raise map_transport_error(exc, provider=self.name, model=request.model) from exc
+            try:
+                raise_for_status(response, provider=self.name, model=request.model)
+            except EnrouteError as exc:
+                if self._adapt_thinking(exc, request):
+                    continue
+                raise
+            return self._parse_response(
+                response.json(),
+                latency_ms=(time.perf_counter() - started) * 1000,
+                structured_tool=schema_tool_name(request),
+            )
 
     async def astream(self, request: ChatRequest) -> AsyncIterator[StreamChunk]:
         """Async streaming Messages API call.
@@ -555,22 +621,28 @@ class AnthropicProvider:
         Yields:
             Normalized stream chunks.
         """
-        payload = self._encode_request(request, stream=True)
-        state = _StreamState(
-            model=self._model_id(request.model),
-            structured_tool=schema_tool_name(request),
-        )
-        try:
-            async with self._aclient.stream("POST", "/v1/messages", json=payload) as response:
-                await araise_for_stream_status(response, provider=self.name, model=request.model)
-                async for data in aiter_sse_lines(response):
-                    chunk = self._chunk_from_event(json.loads(data), state)
-                    if chunk is not None:
-                        yield chunk
-        except EnrouteError:
-            raise
-        except Exception as exc:  # noqa: BLE001
-            raise map_transport_error(exc, provider=self.name, model=request.model) from exc
+        while True:
+            payload = self._encode_request(request, stream=True)
+            state = _StreamState(
+                model=self._model_id(request.model),
+                structured_tool=schema_tool_name(request),
+            )
+            try:
+                async with self._aclient.stream("POST", "/v1/messages", json=payload) as response:
+                    await araise_for_stream_status(
+                        response, provider=self.name, model=request.model
+                    )
+                    async for data in aiter_sse_lines(response):
+                        chunk = self._chunk_from_event(json.loads(data), state)
+                        if chunk is not None:
+                            yield chunk
+                return
+            except EnrouteError as exc:
+                if self._adapt_thinking(exc, request):
+                    continue
+                raise
+            except Exception as exc:  # noqa: BLE001
+                raise map_transport_error(exc, provider=self.name, model=request.model) from exc
 
     def close(self) -> None:
         """Close the sync HTTP client."""

@@ -134,6 +134,8 @@ def test_anthropic_streams_thinking_before_the_answer() -> None:
     assert "".join(c.delta.reasoning or "" for c in chunks) == "Counting to twenty."
     assert "".join(c.delta.content or "" for c in chunks) == "1\n2\n3"
     assert any(c.delta.reasoning_signature == "sig-abc" for c in chunks)
+    assert any(c.delta.reasoning_started for c in chunks)
+    assert any(c.delta.reasoning_finished for c in chunks)
     # Reasoning must precede content, so a UI can show progress immediately.
     first_reasoning = next(i for i, c in enumerate(chunks) if c.delta.reasoning)
     first_content = next(i for i, c in enumerate(chunks) if c.delta.content)
@@ -142,6 +144,94 @@ def test_anthropic_streams_thinking_before_the_answer() -> None:
     payload = chunks[first_reasoning].to_openai()
     assert payload["choices"][0]["delta"]["reasoning"] == "Counting "
     assert "content" not in payload["choices"][0]["delta"]
+
+
+@respx.mock
+def test_anthropic_signals_encrypted_thinking_with_start_and_end() -> None:
+    """Fable and Opus encrypt thinking: empty deltas, but the block still opens."""
+    route = respx.post("https://api.anthropic.com/v1/messages").mock(
+        return_value=httpx.Response(
+            200,
+            content=_sse(
+                {
+                    "type": "message_start",
+                    "message": {
+                        "id": "msg_1",
+                        "model": "claude-opus-5",
+                        "usage": {"input_tokens": 8, "output_tokens": 0},
+                    },
+                },
+                {"type": "content_block_start", "index": 0, "content_block": {"type": "thinking"}},
+                {
+                    "type": "content_block_delta",
+                    "index": 0,
+                    "delta": {"type": "thinking_delta", "thinking": ""},
+                },
+                {
+                    "type": "content_block_delta",
+                    "index": 0,
+                    "delta": {"type": "signature_delta", "signature": "sig-enc"},
+                },
+                {"type": "content_block_stop", "index": 0},
+                {"type": "content_block_start", "index": 1, "content_block": {"type": "text"}},
+                {
+                    "type": "content_block_delta",
+                    "index": 1,
+                    "delta": {"type": "text_delta", "text": "1"},
+                },
+                {
+                    "type": "message_delta",
+                    "delta": {"stop_reason": "end_turn"},
+                    "usage": {"output_tokens": 4},
+                },
+            ),
+            headers={"Content-Type": "text/event-stream"},
+        )
+    )
+    provider = AnthropicProvider("sk-ant", base_url="https://api.anthropic.com")
+    chunks = list(provider.stream(_request(model="anthropic/claude-opus-5", stream=True)))
+    provider.close()
+
+    assert _sent(route)["thinking"] == {"type": "adaptive"}
+    assert "".join(c.delta.reasoning or "" for c in chunks) == ""
+    start = next(i for i, c in enumerate(chunks) if c.delta.reasoning_started)
+    end = next(i for i, c in enumerate(chunks) if c.delta.reasoning_finished)
+    content = next(i for i, c in enumerate(chunks) if c.delta.content)
+    assert start < end < content
+    assert chunks[start].to_openai()["choices"][0]["delta"] == {"reasoning_started": True}
+    assert chunks[end].to_openai()["choices"][0]["delta"] == {"reasoning_finished": True}
+
+
+@respx.mock
+def test_anthropic_retries_without_thinking_when_the_model_rejects_it() -> None:
+    ok = {
+        "id": "msg_1",
+        "model": "claude-old",
+        "content": [{"type": "text", "text": "Hi"}],
+        "usage": {"input_tokens": 1, "output_tokens": 1},
+        "stop_reason": "end_turn",
+    }
+    route = respx.post("https://api.anthropic.com/v1/messages").mock(
+        side_effect=[
+            httpx.Response(
+                400,
+                json={
+                    "type": "error",
+                    "error": {
+                        "type": "invalid_request_error",
+                        "message": "thinking is not supported for this model",
+                    },
+                },
+            ),
+            httpx.Response(200, json=ok),
+        ]
+    )
+    provider = AnthropicProvider("sk-ant", base_url="https://api.anthropic.com")
+    assert provider.chat(_request(model="anthropic/claude-old")).text == "Hi"
+    provider.close()
+    assert _sent(route)  # last call
+    assert "thinking" not in json.loads(route.calls[1].request.content)
+    assert json.loads(route.calls[0].request.content)["thinking"] == {"type": "adaptive"}
 
 
 @respx.mock

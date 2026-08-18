@@ -7,6 +7,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+
+- `StreamDelta.reasoning_started` and `reasoning_finished` mark the bounds of a
+  thinking block, including when Anthropic encrypts the tokens and sends empty
+  `thinking_delta` events. Anthropic requests ask for adaptive thinking by
+  default so those bounds actually arrive.
+
 ## [0.3.3] - 2026-08-18
 
 ### Added
