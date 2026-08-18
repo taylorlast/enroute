@@ -7,12 +7,15 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.3.4] - 2026-08-18
+
 ### Added
 
 - `StreamDelta.reasoning_started` and `reasoning_finished` mark the bounds of a
   thinking block, including when Anthropic encrypts the tokens and sends empty
-  `thinking_delta` events. Anthropic requests ask for adaptive thinking by
-  default so those bounds actually arrive.
+  `thinking_delta` events. A UI can show a thinking indicator the same way
+  Cursor does, even when there is no readable text. Anthropic requests ask for
+  adaptive thinking by default so those bounds actually arrive.
 
 ## [0.3.3] - 2026-08-18
 
@@ -82,7 +85,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Environments (tasks, tools, scorers), versioned datasets, and benchmark reports.
 - Docs site (MkDocs) and cookbook-style routing examples.
 
-[Unreleased]: https://github.com/taylorlast/enroute/compare/v0.3.3...HEAD
+[Unreleased]: https://github.com/taylorlast/enroute/compare/v0.3.4...HEAD
+[0.3.4]: https://github.com/taylorlast/enroute/releases/tag/v0.3.4
 [0.3.3]: https://github.com/taylorlast/enroute/releases/tag/v0.3.3
 [0.3.1]: https://github.com/taylorlast/enroute/releases/tag/v0.3.1
 [0.1.0]: https://github.com/taylorlast/enroute/releases/tag/v0.1.0
