@@ -7,6 +7,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.4.0] - 2026-08-21
+
 ### Added
 
 - Gym-shaped environments: subclass `Environment`, decorate methods with
@@ -121,7 +123,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Environments (tasks, tools, scorers), versioned datasets, and benchmark reports.
 - Docs site (MkDocs) and cookbook-style routing examples.
 
-[Unreleased]: https://github.com/taylorlast/enroute/compare/v0.3.4...HEAD
+[Unreleased]: https://github.com/taylorlast/enroute/compare/v0.4.0...HEAD
+[0.4.0]: https://github.com/taylorlast/enroute/releases/tag/v0.4.0
 [0.3.4]: https://github.com/taylorlast/enroute/releases/tag/v0.3.4
 [0.3.3]: https://github.com/taylorlast/enroute/releases/tag/v0.3.3
 [0.3.1]: https://github.com/taylorlast/enroute/releases/tag/v0.3.1
