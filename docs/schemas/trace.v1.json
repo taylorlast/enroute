@@ -8,17 +8,24 @@
     "trace_id": { "type": "string" },
     "environment": { "type": ["string", "null"] },
     "environment_version": { "type": ["string", "null"] },
+    "environment_fingerprint": { "type": ["string", "null"] },
     "task_id": { "type": ["string", "null"] },
+    "model": { "type": ["string", "null"] },
+    "initial_state": { "type": ["object", "null"] },
     "steps": {
       "type": "array",
       "items": {
         "type": "object",
         "required": ["type"],
         "properties": {
-          "type": { "enum": ["llm", "tool", "event"] }
+          "type": { "enum": ["decision", "llm", "tool", "event"] }
         }
       }
     },
+    "final_state": { "type": ["object", "null"] },
+    "metrics": { "type": "object" },
+    "terminated": { "type": ["boolean", "null"] },
+    "truncated": { "type": ["boolean", "null"] },
     "outcome": {
       "type": ["object", "null"],
       "properties": {

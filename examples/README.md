@@ -41,4 +41,7 @@ client.close()
 | --- | --- |
 | [`tracing/`](tracing/) | Redaction, sinks, late labels |
 | [`environment/`](environment/) | Tasks, tools, scorers → datasets |
+| [`environment/library/`](environment/library/) | Basic RL: search / read / answer, then `returns(γ)` |
+| [`environment/wordle/`](environment/wordle/) | Wordle: `uv run python examples/wordle/run.py --secret crane` |
+| [`environment/twitter/`](environment/twitter/) | `TwitterEnv`: run a simulated Twitter account |
 | [`benchmarking/`](benchmarking/) | Compare models on an environment |

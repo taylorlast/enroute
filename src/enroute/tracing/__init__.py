@@ -9,18 +9,32 @@ Examples:
 from __future__ import annotations
 
 from enroute.tracing.redaction import Redactor, Sampler
-from enroute.tracing.schema import Event, LLMCall, Outcome, Step, ToolCallStep, Trace
+from enroute.tracing.schema import (
+    Decision,
+    Event,
+    LLMCall,
+    Outcome,
+    ParsedAction,
+    RewardEvent,
+    Step,
+    ToolCallStep,
+    Trace,
+    Transition,
+)
 from enroute.tracing.sinks import JSONLSink, MultiSink, OTelSink, Sink, SQLiteSink
 from enroute.tracing.writer import TraceWriter
 
 __all__ = [
+    "Decision",
     "Event",
     "JSONLSink",
     "LLMCall",
     "MultiSink",
     "OTelSink",
     "Outcome",
+    "ParsedAction",
     "Redactor",
+    "RewardEvent",
     "SQLiteSink",
     "Sampler",
     "Sink",
@@ -28,4 +42,5 @@ __all__ = [
     "ToolCallStep",
     "Trace",
     "TraceWriter",
+    "Transition",
 ]

@@ -58,7 +58,7 @@ client = Enroute(providers={"openai": os.environ["OPENAI_API_KEY"]})
 | --- | --- |
 | **Router** | Sync/async chat + streaming, fallbacks, retries, cost accounting, model catalog |
 | **Tracing** | JSONL / SQLite / OTel sinks, redaction, sampling, late labels, attempt history |
-| **Environments** | Tasks + tools + scorers → scored traces (the RL harness) |
+| **Environments** | Versioned `Environment` subclass + tools + scorers → one episode Trace |
 | **Benchmarks** | Environment × models → markdown/JSON report with win rates |
 
 ## Environments in 30 seconds

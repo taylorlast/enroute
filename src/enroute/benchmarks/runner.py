@@ -140,7 +140,7 @@ class Benchmark:
 
     def __init__(
         self,
-        env: Environment,
+        env: Environment[Any, Any],
         models: list[str],
         *,
         client: Enroute,
@@ -174,7 +174,7 @@ class Benchmark:
         def _run(job: tuple[str, TaskData, int]) -> tuple[str, Rollout | BaseException]:
             model, task, _repeat = job
             try:
-                return model, self.env.rollout(task, self.client, model=model)
+                return model, self.env.spawn().rollout(task, self.client, model=model)
             except BaseException as exc:  # noqa: BLE001
                 return model, exc
 
@@ -197,7 +197,11 @@ class Benchmark:
             environment_version=self.env.version,
             models=model_stats,
             win_rates=_win_rates(rewards),
-            metadata={"repeats": self.repeats, "tasks": len(task_list)},
+            metadata={
+                "repeats": self.repeats,
+                "tasks": len(task_list),
+                "environment_fingerprint": self.env.fingerprint(),
+            },
         )
 
 
@@ -221,8 +225,24 @@ def _aggregate(model: str, items: list[Rollout | BaseException]) -> ModelStats:
         if outcome:
             for name, value in outcome.scores.items():
                 score_lists.setdefault(name, []).append(value)
-        # Prefer last LLM step latency / cost.
+        # Prefer last decision / LLM step latency / cost.
         for step in reversed(item.trace.steps):
+            if step.type == "decision":
+                output = step.model_output
+                if output is None:
+                    continue
+                latency = getattr(output, "latency_ms", None)
+                if latency is None and isinstance(output, dict):
+                    latency = output.get("latency_ms")
+                usage = getattr(output, "usage", None)
+                cost = usage.cost if usage is not None and hasattr(usage, "cost") else None
+                if cost is None and isinstance(output, dict):
+                    cost = (output.get("usage") or {}).get("cost")
+                if latency is not None:
+                    latencies.append(float(latency))
+                if cost is not None:
+                    costs.append(float(cost))
+                break
             if step.type == "llm":
                 if step.latency_ms is not None:
                     latencies.append(step.latency_ms)

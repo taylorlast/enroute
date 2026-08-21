@@ -134,20 +134,31 @@ def _apply_patterns(obj: Any, patterns: list[re.Pattern[str]], replacement: str)
     return obj
 
 
+def _omit_request_messages(req: Any) -> None:
+    if isinstance(req, dict) and "messages" in req:
+        for msg in req["messages"]:
+            if isinstance(msg, dict) and "content" in msg:
+                msg["content"] = "[CONTENT_OMITTED]"
+
+
+def _omit_response_content(resp: Any) -> None:
+    if isinstance(resp, dict):
+        for choice in resp.get("choices") or []:
+            message = choice.get("message")
+            if isinstance(message, dict) and "content" in message:
+                message["content"] = "[CONTENT_OMITTED]"
+
+
 def _drop_content(data: dict[str, Any]) -> dict[str, Any]:
     data = copy.deepcopy(data)
     for step in data.get("steps") or []:
-        if step.get("type") != "llm":
-            continue
-        req = step.get("request")
-        if isinstance(req, dict) and "messages" in req:
-            for msg in req["messages"]:
-                if isinstance(msg, dict) and "content" in msg:
-                    msg["content"] = "[CONTENT_OMITTED]"
-        resp = step.get("response")
-        if isinstance(resp, dict):
-            for choice in resp.get("choices") or []:
-                message = choice.get("message")
-                if isinstance(message, dict) and "content" in message:
-                    message["content"] = "[CONTENT_OMITTED]"
+        step_type = step.get("type")
+        if step_type == "llm":
+            _omit_request_messages(step.get("request"))
+            _omit_response_content(step.get("response"))
+        elif step_type == "decision":
+            _omit_request_messages(step.get("model_context"))
+            _omit_response_content(step.get("model_output"))
+            if "observation" in step and step["observation"] is not None:
+                step["observation"] = "[CONTENT_OMITTED]"
     return data

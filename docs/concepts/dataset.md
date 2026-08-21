@@ -25,7 +25,7 @@ ds.save("data/prod-refunds.jsonl")
 
 ## Content hash
 
-`content_hash` fingerprints trace ids and outcomes so you can tell whether two dataset builds are identical — important for CI and paper-trail reproducibility.
+`content_hash` fingerprints trace ids and outcomes so you can tell whether two dataset builds are identical — important for CI and paper-trail reproducibility. `Dataset.from_traces` also records `environment_fingerprints` in metadata when traces carry them.
 
 ## How this connects
 

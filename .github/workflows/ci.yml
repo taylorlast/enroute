@@ -67,7 +67,7 @@ jobs:
             uv run python "$f"
           done < <(
             find examples/tracing examples/environment examples/benchmarking \
-              -type f -name '*.py' | sort
+              -type f \( -name 'run.py' -o -name '[0-9]*.py' \) | sort
             echo examples/routing/catalog/list_models.py
           )
           # Cookbook routing examples need ENROUTE_API_KEY (skipped in CI)

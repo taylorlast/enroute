@@ -7,6 +7,42 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+
+- Gym-shaped environments: subclass `Environment`, decorate methods with
+  `@tool`, and use `reset` / `step` / `close_episode` alongside `rollout()`.
+  One rollout is one episode; the model is passed in, not baked into the
+  environment. The default `step` dispatches tools and records a decision;
+  override `step` when the action is not a tool call (OpenEnv-style).
+- Episode traces: optional `Decision` steps (observation, model context, parsed
+  action, tool results, reward events) plus `initial_state`, `final_state`,
+  `model`, `metrics`, `terminated`, `truncated`, and `environment_fingerprint`.
+  `Trace.transitions()` flattens an episode for a future trainer. Production
+  `llm` / `tool` / `event` steps still round-trip.
+- Simulated Twitter account example (`examples/environment/twitter`) with
+  person-complete tools and pluggable goals.
+- `Trace.credit()` (late reward on the episode or one decision) and
+  `Trace.returns(gamma=…)` for discounted credit assignment. Reward is not
+  assumed per decision — research-then-answer uses a terminal scorer; likes
+  that arrive later use `credit`.
+- Library example (`examples/environment/library`): search / read / answer,
+  the start-to-finish RL handoff.
+- Wordle example (`examples/environment/wordle`): `WordleEnv` owns the secret,
+  official word lists, `guess`, board observations, and rewards. The model
+  is only the policy. The example plays via `reset` / `step` (Gymnasium /
+  OpenEnv); `rollout()` stays as convenience.
+- `Observation` and `State` types (`Environment[ObsT, StateT]`). Nested
+  `@tool` calls are recorded as `ToolCallStep.children` for hierarchical
+  credit later. Library `research` is the demo.
+
+### Changed
+
+- `World` / `BaseWorld` / `world=` are gone. Write
+  `class WordleEnv(Environment[WordleObservation, WordleState])` and put
+  episode data on `self.state`. `Rollout.env` replaces `Rollout.world`.
+  Concurrent episodes use `env.spawn()` (Benchmark does this automatically).
+  Drive agents with `reset` / `step` / `rollout`; `observe` is an author hook.
+
 ## [0.3.4] - 2026-08-18
 
 ### Added

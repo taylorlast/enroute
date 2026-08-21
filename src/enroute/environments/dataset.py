@@ -85,11 +85,18 @@ class Dataset(BaseModel):
         Returns:
             A new :class:`Dataset`.
         """
+        items = list(traces)
+        fingerprints = sorted(
+            {t.environment_fingerprint for t in items if t.environment_fingerprint}
+        )
+        meta = dict(metadata or {})
+        if fingerprints:
+            meta.setdefault("environment_fingerprints", fingerprints)
         return cls(
             name=name,
             version=version,
-            traces=list(traces),
-            metadata=metadata or {},
+            traces=items,
+            metadata=meta,
         )
 
     @classmethod
